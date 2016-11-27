@@ -34,6 +34,9 @@ impl Board {
 			board.push(vec![Empty; width])
 		}
 
+		board[0][0] = Target;
+		board[height/2][width/2] = Snake(Direction::Down);
+
 		Board {
 			board: board,
 		}
