@@ -30,7 +30,7 @@ impl Board {
 	pub fn new(width: usize, height: usize) -> Board {
 		let mut board = Vec::<Vec<Cell>>::with_capacity(height);
 
-		for row in 0..height {
+		for _row in 0..height {
 			board.push(vec![Empty; width])
 		}
 
