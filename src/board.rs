@@ -89,7 +89,20 @@ impl Game {
 			Some((new_column, new_row)) => {
 				match self.board.at(new_column, new_row) {
 					Some(Empty) => {
-						// Move forward normally
+						// Move forward normally - shrink the tail
+						let (column, row) = self.tail;
+						let d = match self.board.at(column, row).unwrap() {
+							Snake(d) => d,
+							_ => panic!("not a snake at the tail"),
+						};
+						// if the tail moves into a wall, the player already died
+						let (new_tcol, new_trow) = self.next(d, column, row).unwrap();
+
+						// TODO: encapsulation violation, again
+						self.board.board[new_row][new_column] = Snake(self.get_direction());
+						self.board.board[row][column] = Empty;
+						self.head = (new_column, new_row);
+						self.tail = (new_tcol, new_trow);
 					},
 					Some(Target) => {
 						// You ate the target.
