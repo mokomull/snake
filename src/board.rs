@@ -105,7 +105,10 @@ impl Game {
 						self.tail = (new_tcol, new_trow);
 					},
 					Some(Target) => {
-						// You ate the target.
+						// You ate the target - leave the tail and grow
+						// TODO: board encapsulation.  Yet again.
+						self.board.board[new_row][new_column] = Snake(self.get_direction());
+						self.head = (new_column, new_row);
 					},
 					Some(Snake(_)) => panic!("You died."),
 					None => panic!("You died."),
