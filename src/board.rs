@@ -174,4 +174,27 @@ mod test {
 		assert_eq!((column, row+1), game.head);
 		assert_eq!(game.head, game.tail);
 	}
+
+	#[test]
+	fn target() {
+		use super::Direction::*;
+
+		let mut game = Game::new(80, 24);
+		game.set_direction(Up);
+
+		for row in 0..24 {
+			for col in 0..80 {
+				match game.board.at(col, row) {
+					Some(Empty) => game.board.board[row][col] = Target,
+					_ => (),
+				}
+			}
+		}
+
+		let (column, row) = game.head;
+		let orig_tail = game.tail;
+		game.tick();
+		assert_eq!((column, row-1), game.head);
+		assert_eq!(orig_tail, game.tail);
+	}
 }
