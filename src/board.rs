@@ -49,13 +49,16 @@ impl Board {
 #[cfg(test)]
 mod test {
 	use super::*;
+	use super::Cell::*;
 
 	#[test]
 	fn i_have_no_idea_what_im_doing() {
 		let board = Board::new(80, 24);
 
-		assert_eq!(Some(Cell::Empty), board.at(12, 12));
+		assert_eq!(Some(Empty), board.at(12, 12));
 		assert_eq!(None, board.at(80, 0));
 		assert_eq!(None, board.at(0, 24));
+		assert_eq!(Some(Empty), board.at(79, 0));
+		assert_eq!(Some(Empty), board.at(0, 23));
 	}
 }
