@@ -6,6 +6,12 @@ fn main() {
 
 	let board = board::Board::new(width, height);
 
+	#[cfg(feature = "clear")]
+	{
+		// Clear screen
+		print!("\x1bc");
+	}
+
 	print!("┌");
 	for _ in 0..width {
 		print!("─");
