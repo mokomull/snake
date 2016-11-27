@@ -25,8 +25,8 @@ fn main() {
 		for col in 0..width {
 			let c = match board.at(col, row).unwrap() {
 				Empty => " ",
-				Snake(_) => "\u{2588}",
-				Target => "\u{2592}",
+				Snake(_) => "\x1b[32m\u{2588}\x1b[0m",
+				Target => "\x1b[31m\u{2592}\x1b[m",
 			};
 			print!("{}", c);
 		}
