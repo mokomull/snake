@@ -34,9 +34,6 @@ impl Board {
 			board.push(vec![Empty; width])
 		}
 
-		board[0][0] = Target;
-		board[height/2][width/2] = Snake(Direction::Down);
-
 		Board {
 			board: board,
 		}
@@ -46,6 +43,73 @@ impl Board {
 		// .clone() because for some reason it won't copy the referent, even
 		// though it's trivial.
 		self.board.get(row).and_then(|r| r.get(column)).map(|c| c.clone())
+	}
+}
+
+pub struct Game {
+	board: Board,
+	head: (usize, usize),
+	tail: (usize, usize),
+}
+
+impl Game {
+	pub fn new(width: usize, height: usize) -> Game {
+		let mut board = Board::new(width, height);
+		let column = width / 2;
+		let row = height / 2;
+
+		// TODO: poor encapsulation of the board
+		board.board[0][0] = Target;
+		board.board[row][column] = Snake(Direction::Down);
+
+		Game {
+			board: board,
+			head: (column, row),
+			tail: (column, row),
+		}
+	}
+
+	pub fn get_direction(&self) -> Direction {
+		let (column, row) = self.head;
+		match self.board.at(column, row) {
+			Some(Snake(d)) => d,
+			_ => panic!("The snake doesn't have a head"),
+		}
+	}
+
+	pub fn set_direction(&mut self, d: Direction) {
+		let (column, row) = self.head;
+		// TODO: poorly encapsulated.
+		self.board.board[row][column] = Snake(d);
+	}
+
+	pub fn tick(&mut self) {
+		let (column, row) = self.head;
+		match self.next(self.get_direction(), column, row) {
+			Some((new_column, new_row)) => {
+				match self.board.at(new_column, new_row) {
+					Some(Empty) => {
+						// Move forward normally
+					},
+					Some(Target) => {
+						// You ate the target.
+					},
+					Some(Snake(_)) => panic!("You died."),
+					None => panic!("You died."),
+				}
+			}
+			None => panic!("You died."),
+		}
+	}
+
+	fn next(&self, d: Direction, column: usize, row: usize) -> Option<(usize, usize)> {
+		use self::Direction::*;
+		match d {
+			Left => if column > 0 { Some((column-1, row)) } else { None },
+			Right => self.board.at(column+1, row).map(|_| (column+1, row)),
+			Up => if row > 0 { Some((column, row-1)) } else { None },
+			Down => self.board.at(column, row+1).map(|_| (column, row+1)),
+		}
 	}
 }
 
@@ -63,5 +127,38 @@ mod test {
 		assert_eq!(None, board.at(0, 24));
 		assert_eq!(Some(Empty), board.at(79, 0));
 		assert_eq!(Some(Empty), board.at(0, 23));
+	}
+
+	#[test]
+	fn game_tick() {
+		use super::Direction::*;
+
+		let mut game = Game::new(80, 24);
+		game.set_direction(Up);
+
+		let (column, row) = game.head;
+		assert_eq!(Some(Snake(Up)), game.board.at(column, row));
+
+		game.tick();
+		assert_eq!((column, row-1), game.head);
+		assert_eq!((column, row-1), game.tail);
+
+		let (column, row) = game.head;
+		game.set_direction(Left);
+		game.tick();
+		assert_eq!((column-1, row), game.head);
+		assert_eq!(game.head, game.tail);
+
+		let (column, row) = game.head;
+		game.set_direction(Right);
+		game.tick();
+		assert_eq!((column+1, row), game.head);
+		assert_eq!(game.head, game.tail);
+
+		let (column, row) = game.head;
+		game.set_direction(Down);
+		game.tick();
+		assert_eq!((column, row+1), game.head);
+		assert_eq!(game.head, game.tail);
 	}
 }
