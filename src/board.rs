@@ -7,10 +7,21 @@ extern crate rand;
 #[derive(Debug)]
 #[derive(PartialEq)]
 pub enum Direction {
-	Up,
-	Left,
-	Down,
-	Right,
+	Up = 1,
+	Left = 2,
+	Down = 3,
+	Right = 4,
+}
+
+impl From<usize> for Direction {
+	fn from(u: usize) -> Direction {
+		match u {
+			1 => Direction::Up,
+			2 => Direction::Left,
+			3 => Direction::Down,
+			_ => Direction::Right,
+		}
+	}
 }
 
 #[derive(Clone)]

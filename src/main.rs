@@ -1,5 +1,11 @@
 mod board;
 extern crate termios;
+extern crate time;
+extern crate timer;
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize};
+use std::sync::atomic::Ordering::SeqCst;
 
 const WIDTH: usize = 78;
 const HEIGHT: usize  = 20;
@@ -39,7 +45,7 @@ fn dump(game: &board::Game) {
 	print!("┘\n");
 }
 
-fn set_direction(game: &mut board::Game) {
+fn set_direction(direction: &Arc<AtomicUsize>) {
 	use std::io::Read;
 	use board::Direction::*;
 
@@ -51,10 +57,10 @@ fn set_direction(game: &mut board::Game) {
 			match &buf {
 				// For some reason, these are [ESC] O A (etc.) in zsh, but Rust
 				// is receiving [ESC] [ A (etc.).
-				b"\x1b[A" => game.set_direction(Up),
-				b"\x1b[B" => game.set_direction(Down),
-				b"\x1b[C" => game.set_direction(Right),
-				b"\x1b[D" => game.set_direction(Left),
+				b"\x1b[A" => direction.store(Up as usize, SeqCst),
+				b"\x1b[B" => direction.store(Down as usize, SeqCst),
+				b"\x1b[C" => direction.store(Right as usize, SeqCst),
+				b"\x1b[D" => direction.store(Left as usize, SeqCst),
 				_ => println!("Not an arrow key: {:?}", buf),
 			}
 		},
@@ -65,6 +71,7 @@ fn set_direction(game: &mut board::Game) {
 
 fn main() {
 	use termios::{Termios, ICANON, ECHO, TCSANOW, tcsetattr};
+	use board::Direction::Up;
 
 	let mut game = board::Game::new(WIDTH, HEIGHT);
 
@@ -75,10 +82,22 @@ fn main() {
 		Err(x) => panic!("tcsetattr: {}", x),
 	}
 
-	loop {
-		dump(&game);
-		set_direction(&mut game);
+	let direction = Arc::new(AtomicUsize::new(Up as usize));
+	let read_direction = direction.clone();
+
+	use time::Duration;
+	let interval = Duration::milliseconds(1000);
+	let timer = timer::Timer::new();
+
+	let _guard = timer.schedule_repeating(interval, move || {
+		let d = read_direction.load(SeqCst);
+		game.set_direction(board::Direction::from(d));
 		game.tick();
+		dump(&game);
+	});
+
+	loop {
+		set_direction(&direction);
 	}
 }
 
