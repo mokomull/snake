@@ -86,7 +86,7 @@ fn main() {
 	let read_direction = direction.clone();
 
 	use time::Duration;
-	let interval = Duration::milliseconds(1000);
+	let interval = Duration::milliseconds(100);
 	let timer = timer::Timer::new();
 
 	let _guard = timer.schedule_repeating(interval, move || {
