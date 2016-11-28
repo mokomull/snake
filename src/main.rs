@@ -1,11 +1,9 @@
 mod board;
 
-fn main() {
-    let width = 78;
-	let height = 20;
+const WIDTH: usize = 78;
+const HEIGHT: usize  = 20;
 
-	let game = board::Game::new(width, height);
-
+fn dump(game: &board::Game) {
 	#[cfg(feature = "clear")]
 	{
 		// Clear screen
@@ -13,16 +11,16 @@ fn main() {
 	}
 
 	print!("┌");
-	for _ in 0..width {
+	for _ in 0..WIDTH {
 		print!("─");
 	}
 	print!("┐\n");
 
 	use board::Cell::*;
 
-	for row in 0..height {
+	for row in 0..HEIGHT {
 		print!("│");
-		for col in 0..width {
+		for col in 0..WIDTH {
 			let c = match game.at(col, row).unwrap() {
 				Empty => " ",
 				Snake(_) => "\x1b[32m\u{2588}\x1b[0m",
@@ -34,8 +32,13 @@ fn main() {
 	}
 
 	print!("└");
-	for _ in 0..width {
+	for _ in 0..WIDTH {
 		print!("─");
 	}
 	print!("┘\n");
+}
+
+fn main() {
+	let game = board::Game::new(WIDTH, HEIGHT);
+	dump(&game);
 }
