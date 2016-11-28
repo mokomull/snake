@@ -5,6 +5,7 @@ authors = ["Matt Mullins <mmullins@mmlx.us>"]
 
 [dependencies]
 termios = "0.2.2"
+rand = "0.3"
 
 [features]
 clear = []

@@ -1,3 +1,5 @@
+extern crate rand;
+
 // TODO: make Direction private - the UI won't need to know the snake's
 // direction.  I saw something about hiding enum contents at one point, but I
 // forgot where.
@@ -50,6 +52,8 @@ pub struct Game {
 	board: Board,
 	head: (usize, usize),
 	tail: (usize, usize),
+	width: usize,
+	height: usize,
 }
 
 impl Game {
@@ -66,6 +70,8 @@ impl Game {
 			board: board,
 			head: (column, row),
 			tail: (column, row),
+			width: width,
+			height: height,
 		}
 	}
 
@@ -109,6 +115,23 @@ impl Game {
 						// TODO: board encapsulation.  Yet again.
 						self.board.board[new_row][new_column] = Snake(self.get_direction());
 						self.head = (new_column, new_row);
+
+						// Randomly generate a new target
+						let mut rng = rand::thread_rng();
+						let mut col_range = rand::distributions::Range::new(0, self.width);
+						let mut row_range = rand::distributions::Range::new(0, self.height);
+						use board::rand::distributions::Sample;
+						loop {
+							let (new_col, new_row) = (col_range.sample(&mut rng), row_range.sample(&mut rng));
+
+							match self.board.at(new_col, new_row) {
+								Some(Empty) | Some(Target) => {
+									self.board.board[new_row][new_col] = Target;
+									break;
+								},
+								_ => (), // keep going
+							}
+						}
 					},
 					Some(Snake(_)) => panic!("You died."),
 					None => panic!("You died."),
