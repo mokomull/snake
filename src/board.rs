@@ -20,7 +20,7 @@ pub enum Cell {
 	Snake(Direction),
 }
 
-pub struct Board {
+struct Board {
 	// Indexed by row, then by column, to make printing to the screen easier later.
 	board: Vec<Vec<Cell>>,
 }
@@ -127,6 +127,10 @@ impl Game {
 			Down => self.board.at(column, row+1).map(|_| (column, row+1)),
 		}
 	}
+
+	pub fn at(&self, column: usize, row: usize) -> Option<Cell> {
+		self.board.at(column, row)
+	}
 }
 
 #[cfg(test)]
@@ -136,7 +140,7 @@ mod test {
 
 	#[test]
 	fn i_have_no_idea_what_im_doing() {
-		let board = Board::new(80, 24);
+		let board = super::Board::new(80, 24);
 
 		assert_eq!(Some(Empty), board.at(12, 12));
 		assert_eq!(None, board.at(80, 0));
