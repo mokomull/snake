@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Matt Mullins <mmullins@mmlx.us>"]
 
 [dependencies]
+termios = "0.2.2"
 
 [features]
 clear = []
