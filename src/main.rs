@@ -1,5 +1,8 @@
 mod board;
 
+use std::time::Duration;
+use std::thread::sleep;
+
 const WIDTH: usize = 78;
 const HEIGHT: usize  = 20;
 
@@ -39,6 +42,12 @@ fn dump(game: &board::Game) {
 }
 
 fn main() {
-	let game = board::Game::new(WIDTH, HEIGHT);
-	dump(&game);
+	let mut game = board::Game::new(WIDTH, HEIGHT);
+	let frame_time = Duration::from_millis(500);
+
+	loop {
+		dump(&game);
+		sleep(frame_time);
+		game.tick();
+	}
 }
