@@ -34,10 +34,7 @@ fn dump<T: Write>(stream: &mut T, game: &board::Game,
 }
 
 fn main() {
-	use board::Direction::Up;
-
 	let mut game = board::Game::new(WIDTH, HEIGHT);
-    game.set_direction(Up);
 
 	let interval = std::time::Duration::from_millis(100);
 
@@ -108,6 +105,16 @@ fn main() {
                 &mut socket, &game,
                 window, snake_gc, target_gc, bg_gc
             ),
+            Event::KeyPress { detail: key, .. } => {
+                use board::Direction::*;
+                match key {
+                    111 => game.set_direction(Up),
+                    113 => game.set_direction(Left),
+                    114 => game.set_direction(Right),
+                    116 => game.set_direction(Down),
+                    _ => (),
+                }
+            }
             _ => {
                 println!("Unhandled event: {:?}", event);
             }
