@@ -2,103 +2,117 @@ mod board;
 extern crate termios;
 extern crate time;
 extern crate timer;
+extern crate x11_client;
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize};
-use std::sync::atomic::Ordering::SeqCst;
+use std::os::unix::net::UnixStream;
+use std::io::prelude::*;
 
-const WIDTH: usize = 78;
-const HEIGHT: usize  = 20;
+use x11_client::*;
 
-fn dump(game: &board::Game) {
-	#[cfg(feature = "clear")]
-	{
-		// Clear screen
-		print!("\x1bc");
-	}
+const WIDTH: usize = 64;
+const HEIGHT: usize  = 64;
+const SNAKE_SIZE: usize = 16;
 
-	print!("┌");
-	for _ in 0..WIDTH {
-		print!("─");
-	}
-	print!("┐\n");
-
-	use board::Cell::*;
-
+fn dump<T: Write>(stream: &mut T, game: &board::Game,
+        window: u32, snake_gc: u32, target_gc: u32, bg_gc: u32) {
 	for row in 0..HEIGHT {
-		print!("│");
 		for col in 0..WIDTH {
-			let c = match game.at(col, row).unwrap() {
-				Empty => " ",
-				Snake(_) => "\x1b[32m\u{2588}\x1b[0m",
-				Target => "\x1b[31m\u{2592}\x1b[m",
-			};
-			print!("{}", c);
+            let gc = match game.at(col, row).unwrap() {
+                board::Cell::Empty => bg_gc,
+                board::Cell::Target => target_gc,
+                board::Cell::Snake(_) => snake_gc,
+            };
+            stream.write(&PolyFillRectangle::new(
+                window,
+                gc,
+                (col * SNAKE_SIZE) as i16,
+                (row * SNAKE_SIZE) as i16,
+                SNAKE_SIZE as u16, SNAKE_SIZE as u16
+            ).as_bytes());
 		}
-		print!("│\n");
-	}
-
-	print!("└");
-	for _ in 0..WIDTH {
-		print!("─");
-	}
-	print!("┘\n");
-}
-
-fn set_direction(direction: &Arc<AtomicUsize>) {
-	use std::io::Read;
-	use board::Direction::*;
-
-	let mut stdin = std::io::stdin();
-	let mut buf = [0; 3];
-
-	match stdin.read(&mut buf) {
-		Ok(3) => {
-			match &buf {
-				// For some reason, these are [ESC] O A (etc.) in zsh, but Rust
-				// is receiving [ESC] [ A (etc.).
-				b"\x1b[A" => direction.store(Up as usize, SeqCst),
-				b"\x1b[B" => direction.store(Down as usize, SeqCst),
-				b"\x1b[C" => direction.store(Right as usize, SeqCst),
-				b"\x1b[D" => direction.store(Left as usize, SeqCst),
-				_ => println!("Not an arrow key: {:?}", buf),
-			}
-		},
-		Ok(_) => println!("Got too few bytes."),
-		Err(e) => panic!("{}", e),
 	}
 }
 
 fn main() {
-	use termios::{Termios, ICANON, ECHO, TCSANOW, tcsetattr};
 	use board::Direction::Up;
 
 	let mut game = board::Game::new(WIDTH, HEIGHT);
+    game.set_direction(Up);
 
-	let mut termios = Termios::from_fd(0).unwrap();
-	termios.c_lflag &= !(ICANON | ECHO);
-	match tcsetattr(0, TCSANOW, &termios) {
-		Ok(_) => (),
-		Err(x) => panic!("tcsetattr: {}", x),
-	}
+	let interval = std::time::Duration::from_millis(100);
 
-	let direction = Arc::new(AtomicUsize::new(Up as usize));
-	let read_direction = direction.clone();
+    let mut socket = UnixStream::connect("/tmp/.X11-unix/X0").unwrap();
+    let client_init: Vec<_> = ClientInit::new().into();
+    socket.write(&client_init).unwrap();
 
-	use time::Duration;
-	let interval = Duration::milliseconds(100);
-	let timer = timer::Timer::new();
+    let server_init = ServerInit::from_stream(&mut socket).unwrap();
+    let window = server_init.resource_id_base + 1;
+    let snake_gc = window + 1;
+    let bg_gc = snake_gc + 1;
+    let target_gc = bg_gc + 1;
 
-	let _guard = timer.schedule_repeating(interval, move || {
-		let d = read_direction.load(SeqCst);
-		game.set_direction(board::Direction::from(d));
-		game.tick();
-		dump(&game);
-	});
+    socket.write(&CreateWindow::new(
+        24,
+        window,
+        server_init.roots[0].root,
+        0, 0,
+        (WIDTH * SNAKE_SIZE) as u16, (HEIGHT * SNAKE_SIZE) as u16,
+        0, // border-width
+        1, // InputOutput
+        0, // visual: CopyFromParent
+    ).as_bytes()).unwrap();
 
-	loop {
-		set_direction(&direction);
-	}
+    socket.write(&MapWindow::new(window).as_bytes()).unwrap();
+    socket.write(&ChangeWmName::new(
+        window,
+        "Snake".into()
+    ).as_bytes()).unwrap();
+
+    socket.write(&CreateGc::new(
+        snake_gc, window, 0x00AA00,
+    ).as_bytes()).unwrap();
+
+    socket.write(&CreateGc::new(
+        bg_gc, window, 0xFFFFFF,
+    ).as_bytes()).unwrap();
+
+    socket.write(&CreateGc::new(
+        target_gc, window, 0xee9922,
+    ).as_bytes()).unwrap();
+
+    socket.set_read_timeout(Some(interval)).unwrap();
+    loop {
+        let mut buf = [0 as u8; 32];
+        let result = socket.read_exact(&mut buf);
+        match result {
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                game.tick();
+                dump(
+                    &mut socket,
+                    &game,
+                    window, snake_gc, target_gc, bg_gc
+                );
+                continue;
+            }
+            Err(e) => { // probably EOF
+                println!("Unexpected error: {:?}", e);
+                return;
+            }
+            _ => {}
+        }
+
+        let event = Event::from_bytes(&buf);
+
+        match event {
+            Event::Expose {..} => dump(
+                &mut socket, &game,
+                window, snake_gc, target_gc, bg_gc
+            ),
+            _ => {
+                println!("Unhandled event: {:?}", event);
+            }
+        }
+    }
 }
 
 #[test]
