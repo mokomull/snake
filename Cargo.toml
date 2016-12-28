@@ -8,4 +8,4 @@ termios = "0.2.2"
 rand = "0.3"
 time = "0.1.35"
 timer = "0.1.6"
-x11_client = { path = "../x11_client" }
+x11_client = { git = "https://github.com/mokomull/x11_client.git" }
