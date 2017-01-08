@@ -1,7 +1,4 @@
 mod board;
-extern crate termios;
-extern crate time;
-extern crate timer;
 extern crate x11_client;
 
 use std::os::unix::net::UnixStream;
