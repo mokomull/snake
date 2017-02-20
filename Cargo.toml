@@ -5,7 +5,7 @@ authors = ["Matt Mullins <mmullins@mmlx.us>"]
 
 [dependencies]
 rand = "0.3"
-x11_client = { git = "https://github.com/mokomull/x11_client.git" }
+x11_client = { path = "../x11_client" }
 byteorder = "1.0"
 futures = "0.1.7"
 tokio-core = "0.1.3"

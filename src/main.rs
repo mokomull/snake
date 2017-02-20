@@ -10,12 +10,14 @@ use std::io::Cursor;
 
 use x11_client::*;
 use byteorder::{ByteOrder, BigEndian};
-use futures::{Future, BoxFuture};
+use futures::{Future, BoxFuture, Stream};
+use futures::stream::StreamFuture;
 use tokio_uds::UnixStream;
 use tokio_core::io::{read_exact, write_all};
+use tokio_core::reactor::Interval;
 
-const WIDTH: usize = 64;
-const HEIGHT: usize  = 64;
+const WIDTH: usize = 15;
+const HEIGHT: usize  = 15;
 const SNAKE_SIZE: usize = 16;
 
 fn dump<T: Write>(stream: &mut T, game: &board::Game,
@@ -41,10 +43,10 @@ fn dump<T: Write>(stream: &mut T, game: &board::Game,
 fn main() {
 	let mut game = board::Game::new(WIDTH, HEIGHT);
 
-	let interval = std::time::Duration::from_millis(100);
-
 	let mut core = tokio_core::reactor::Core::new().unwrap();
     let handle = core.handle();
+
+	let interval = Interval::new(std::time::Duration::from_millis(100), &handle).unwrap().into_future();
 
     let socket = UnixStream::connect("/tmp/.X11-unix/X0", &handle).unwrap();
     let client_init: Vec<_> = ClientInit::new().into();
@@ -100,37 +102,46 @@ fn main() {
                     target_gc, window, 0xee9922,
                 ).as_bytes())
             }).and_then(move |(socket, _)| {
-                fn event_handler<T: Read+Write+Send+'static>(socket: T, mut game: board::Game, window: u32, snake_gc: u32, target_gc: u32, bg_gc: u32)
+                enum Tick<T> {
+                    X11Event(T, Event),
+                    TimerFired,
+                }
+                let timer_tick = interval.map(|_| Tick::TimerFired).map_err(|(e, _)| e);
+
+                fn event_handler<T: Read+Write+Send+'static, TickF: Future<Item=Tick<T>, Error=std::io::Error>+Send+'static>(timer_tick: TickF, socket: T, mut game: board::Game, window: u32, snake_gc: u32, target_gc: u32, bg_gc: u32)
                         -> BoxFuture<(), std::io::Error> {
-                    read_exact(socket, [0 as u8; 32]).and_then(move |(mut socket, result)| {
-                        let event = Event::from_bytes(&result);
 
-                        // TODO: run this on a timer
-                        game.tick();
+                    let x11 = read_exact(socket, [0 as u8; 32]).map(|(socket, result)| Tick::X11Event(socket, Event::from_bytes(&result)));
 
-                        match event {
-                            Event::Expose {..} => dump(
-                                &mut socket, &game,
-                                window, snake_gc, target_gc, bg_gc
-                            ),
-                            Event::KeyPress { detail: key, .. } => {
-                                use board::Direction::*;
-                                match key {
-                                    111 => game.set_direction(Up),
-                                    113 => game.set_direction(Left),
-                                    114 => game.set_direction(Right),
-                                    116 => game.set_direction(Down),
-                                    _ => (),
+                    /* TODO: I really need to do something with SelectNext, don't I? */
+                    x11.select(timer_tick).map_err(|(e, _)| e).and_then(move |(tick, next)| {
+                        match tick {
+                            Tick::X11Event(mut socket, event) => match event {
+                                Event::Expose {..} => dump(
+                                    &mut socket, &game,
+                                    window, snake_gc, target_gc, bg_gc
+                                ),
+                                Event::KeyPress { detail: key, .. } => {
+                                    use board::Direction::*;
+                                    match key {
+                                        111 => game.set_direction(Up),
+                                        113 => game.set_direction(Left),
+                                        114 => game.set_direction(Right),
+                                        116 => game.set_direction(Down),
+                                        _ => (),
+                                    }
                                 }
-                            }
-                            _ => {
-                                println!("Unhandled event: {:?}", event);
-                            }
+                                _ => {
+                                    println!("Unhandled event: {:?}", event);
+                                }
+                            },
+                            _ => unreachable!(),
                         }
-                        event_handler(socket, game, window, snake_gc, target_gc, bg_gc)
+                        // event_handler(timer_tick, socket, game, window, snake_gc, target_gc, bg_gc)
+                        futures::future::ok(())
                     }).boxed()
                 }
-                event_handler(socket, game, window, snake_gc, target_gc, bg_gc)
+                event_handler(timer_tick, socket, game, window, snake_gc, target_gc, bg_gc)
             })
         })
     });
