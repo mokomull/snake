@@ -150,6 +150,7 @@ fn main() {
                             Tick::TimerFired(t) => {
                                 println!("timer");
                                 game.tick();
+                                dump(&mut write, &game, window, snake_gc, target_gc, bg_gc);
                                 let timer_tick = t.into_future().map(|(_, t)| Tick::TimerFired(t)).map_err(|(e, _)| e);
                                 Loop::Continue((next.boxed().select(timer_tick.boxed()).map_err(|(e, _)| e).boxed(), write, game, window, snake_gc, target_gc, bg_gc))
                             },
