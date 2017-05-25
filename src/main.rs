@@ -10,7 +10,7 @@ use std::io::Cursor;
 
 use x11_client::*;
 use byteorder::{ByteOrder, BigEndian};
-use futures::{Future, BoxFuture, Stream};
+use futures::{Future, BoxFuture, Stream, IntoFuture};
 use futures::future::{loop_fn, Loop};
 use futures::stream::StreamFuture;
 use tokio_uds::UnixStream;
@@ -103,15 +103,15 @@ fn main() {
                     target_gc, window, 0xee9922,
                 ).as_bytes())
             }).and_then(move |(socket, _)| {
-                enum Tick<T> {
+                enum Tick<T, Timer> {
                     X11Event(T, Event),
-                    TimerFired,
+                    TimerFired(Timer),
                 }
 
                 let (read, write) = socket.split();
 
                 let x11 = read_exact(read, [0 as u8; 32]).map(|(socket, result)| Tick::X11Event(socket, Event::from_bytes(&result)));
-                let timer_tick = interval.map(|_| Tick::TimerFired).map_err(|(e, _)| e);
+                let timer_tick = interval.into_future().map(|(_, t)| Tick::TimerFired(t)).map_err(|(e, _)| e);
 
                 // Box both sides of the Select, since the type parameters of
                 // SelectNext depends on the types of the arguments --
@@ -123,6 +123,7 @@ fn main() {
                     read_or_tick.map(move |(tick, next)| {
                         match tick {
                             Tick::X11Event(mut read, event) => {
+                                println!("x11");
                                 match event {
                                     Event::Expose {..} => dump(
                                         &mut write, &game,
@@ -146,7 +147,12 @@ fn main() {
                                 Loop::Continue((next.boxed().select(x11.boxed()).map_err(|(e, _)| e).boxed(), write,
                                             game, window, snake_gc, target_gc, bg_gc))
                             },
-                            _ => unreachable!(),
+                            Tick::TimerFired(t) => {
+                                println!("timer");
+                                game.tick();
+                                let timer_tick = t.into_future().map(|(_, t)| Tick::TimerFired(t)).map_err(|(e, _)| e);
+                                Loop::Continue((next.boxed().select(timer_tick.boxed()).map_err(|(e, _)| e).boxed(), write, game, window, snake_gc, target_gc, bg_gc))
+                            },
                         }
                     })
                 })
