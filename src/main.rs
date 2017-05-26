@@ -37,7 +37,7 @@ fn dump<T: Write>(stream: &mut T, game: &board::Game,
                 (col * SNAKE_SIZE) as i16,
                 (row * SNAKE_SIZE) as i16,
                 SNAKE_SIZE as u16, SNAKE_SIZE as u16
-            ).as_bytes());
+            ).as_bytes()).unwrap();
 		}
 	}
 }
