@@ -55,7 +55,7 @@ impl Board {
 	pub fn at(&self, column: usize, row: usize) -> Option<Cell> {
 		// .clone() because for some reason it won't copy the referent, even
 		// though it's trivial.
-		self.board.get(row).and_then(|r| r.get(column)).map(|c| c.clone())
+		self.board.get(row).and_then(|r| r.get(column)).cloned()
 	}
 }
 

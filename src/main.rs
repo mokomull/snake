@@ -31,7 +31,7 @@ fn dump<T: Write>(stream: &mut T, game: &board::Game,
                 board::Cell::Target => target_gc,
                 board::Cell::Snake(_) => snake_gc,
             };
-            stream.write(&PolyFillRectangle::new(
+            stream.write_all(&PolyFillRectangle::new(
                 window,
                 gc,
                 (col * SNAKE_SIZE) as i16,
