@@ -202,7 +202,7 @@ dependencies = [
 [[package]]
 name = "x11_client"
 version = "0.1.0"
-source = "git+https://github.com/mokomull/x11_client.git#3b45fd332d6dbdf5013082ca70a2cd255039e5eb"
+source = "git+https://github.com/mokomull/x11_client.git#aba6c7fd2eee486a3feeab57ad329c56d24499e7"
 dependencies = [
  "byteorder 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
