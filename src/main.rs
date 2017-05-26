@@ -108,7 +108,7 @@ fn main() {
                     TimerFired,
                 }
 
-                let (read, write) = socket.split();
+                let (read, mut write) = socket.split();
 
                 let x11 = unfold(read, |read| {
                     let f = read_exact(read, [0 as u8; 32]).map(|(socket, result)|
@@ -120,7 +120,7 @@ fn main() {
 
                 let read_or_tick = x11.select(timer);
 
-                read_or_tick.fold(write, move |mut write, tick| {
+                read_or_tick.for_each(move |tick| {
                     match tick {
                         Tick::X11Event(event) => {
                             println!("x11");
@@ -150,7 +150,7 @@ fn main() {
                             dump(&mut write, &game, window, snake_gc, target_gc, bg_gc);
                         },
                     }
-                    futures::future::ok::<_, std::io::Error>(write)
+                    futures::future::ok::<_, std::io::Error>(())
                 })
             })
         })
