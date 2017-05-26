@@ -12,7 +12,7 @@ use x11_client::*;
 use byteorder::{ByteOrder, BigEndian};
 use futures::{Future, BoxFuture, Stream, IntoFuture};
 use futures::future::{loop_fn, Loop};
-use futures::stream::StreamFuture;
+use futures::stream::{StreamFuture, unfold};
 use tokio_uds::UnixStream;
 use tokio_core::io::{Io, read_exact, write_all};
 use tokio_core::reactor::Interval;
@@ -47,7 +47,7 @@ fn main() {
 	let mut core = tokio_core::reactor::Core::new().unwrap();
     let handle = core.handle();
 
-	let interval = Interval::new(std::time::Duration::from_millis(100), &handle).unwrap().into_future();
+	let interval = Interval::new(std::time::Duration::from_millis(100), &handle).unwrap();
 
     let socket = UnixStream::connect("/tmp/.X11-unix/X0", &handle).unwrap();
     let client_init: Vec<_> = ClientInit::new().into();
@@ -103,59 +103,54 @@ fn main() {
                     target_gc, window, 0xee9922,
                 ).as_bytes())
             }).and_then(move |(socket, _)| {
-                enum Tick<T, Timer> {
+                enum Tick<T> {
                     X11Event(T, Event),
-                    TimerFired(Timer),
+                    TimerFired,
                 }
 
                 let (read, write) = socket.split();
 
-                let x11 = read_exact(read, [0 as u8; 32]).map(|(socket, result)| Tick::X11Event(socket, Event::from_bytes(&result)));
-                let timer_tick = interval.into_future().map(|(_, t)| Tick::TimerFired(t)).map_err(|(e, _)| e);
+                let x11 = unfold(read, |read| {
+                    let f = read_exact(read, [0 as u8; 32]).map(|(socket, result)|
+                        (Tick::X11Event(socket, Event::from_bytes(&result)), socket)
+                    );
+                    Some(f)
+                });
+                let timer = interval.map(|()| Tick::TimerFired);
 
-                // Box both sides of the Select, since the type parameters of
-                // SelectNext depends on the types of the arguments --
-                // recursing in loop_fn will otherwise try to infinitely nest
-                // SelectNext types
-                let read_or_tick = x11.boxed().select(timer_tick.boxed()).map_err(|(e, _)| e).boxed();
+                let read_or_tick = x11.select(timer);
 
-                loop_fn::<_, (), _, _>((read_or_tick, write, game, window, snake_gc, target_gc, bg_gc), |(mut read_or_tick, mut write, mut game, window, snake_gc, target_gc, bg_gc)| {
-                    read_or_tick.map(move |(tick, next)| {
-                        match tick {
-                            Tick::X11Event(mut read, event) => {
-                                println!("x11");
-                                match event {
-                                    Event::Expose {..} => dump(
-                                        &mut write, &game,
-                                        window, snake_gc, target_gc, bg_gc
-                                    ),
-                                    Event::KeyPress { detail: key, .. } => {
-                                        use board::Direction::*;
-                                        match key {
-                                            111 => game.set_direction(Up),
-                                            113 => game.set_direction(Left),
-                                            114 => game.set_direction(Right),
-                                            116 => game.set_direction(Down),
-                                            _ => (),
-                                        }
+                read_or_tick.fold(write, move |mut write, tick| {
+                    match tick {
+                        Tick::X11Event(mut read, event) => {
+                            println!("x11");
+                            match event {
+                                Event::Expose {..} => dump(
+                                    &mut write, &game,
+                                    window, snake_gc, target_gc, bg_gc
+                                ),
+                                Event::KeyPress { detail: key, .. } => {
+                                    use board::Direction::*;
+                                    match key {
+                                        111 => game.set_direction(Up),
+                                        113 => game.set_direction(Left),
+                                        114 => game.set_direction(Right),
+                                        116 => game.set_direction(Down),
+                                        _ => (),
                                     }
-                                    _ => {
-                                        println!("Unhandled event: {:?}", event);
-                                    }
-                                };
-                                let x11 = read_exact(read, [0 as u8; 32]).map(|(socket, result)| Tick::X11Event(socket, Event::from_bytes(&result)));
-                                Loop::Continue((next.boxed().select(x11.boxed()).map_err(|(e, _)| e).boxed(), write,
-                                            game, window, snake_gc, target_gc, bg_gc))
-                            },
-                            Tick::TimerFired(t) => {
-                                println!("timer");
-                                game.tick();
-                                dump(&mut write, &game, window, snake_gc, target_gc, bg_gc);
-                                let timer_tick = t.into_future().map(|(_, t)| Tick::TimerFired(t)).map_err(|(e, _)| e);
-                                Loop::Continue((next.boxed().select(timer_tick.boxed()).map_err(|(e, _)| e).boxed(), write, game, window, snake_gc, target_gc, bg_gc))
-                            },
-                        }
-                    })
+                                }
+                                _ => {
+                                    println!("Unhandled event: {:?}", event);
+                                }
+                            };
+                        },
+                        Tick::TimerFired => {
+                            println!("timer");
+                            game.tick();
+                            dump(&mut write, &game, window, snake_gc, target_gc, bg_gc);
+                        },
+                    }
+                    futures::future::ok(write)
                 })
             })
         })
