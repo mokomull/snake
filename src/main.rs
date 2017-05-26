@@ -3,6 +3,7 @@ extern crate byteorder;
 extern crate x11_client;
 extern crate futures;
 extern crate tokio_core;
+extern crate tokio_io;
 extern crate tokio_uds;
 
 use std::io::prelude::*;
@@ -10,12 +11,12 @@ use std::io::Cursor;
 
 use x11_client::*;
 use byteorder::{ByteOrder, BigEndian};
-use futures::{Future, BoxFuture, Stream, IntoFuture};
-use futures::future::{loop_fn, Loop};
-use futures::stream::{StreamFuture, unfold};
+use futures::{Future, Stream};
+use futures::stream::unfold;
 use tokio_uds::UnixStream;
-use tokio_core::io::{Io, read_exact, write_all};
 use tokio_core::reactor::Interval;
+use tokio_io::AsyncRead; // for .split()
+use tokio_io::io::{read_exact, write_all};
 
 const WIDTH: usize = 15;
 const HEIGHT: usize  = 15;
