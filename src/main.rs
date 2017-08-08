@@ -1,10 +1,12 @@
 mod board;
+mod x11;
 extern crate byteorder;
-extern crate x11_client;
 extern crate futures;
 extern crate tokio_core;
+extern crate x11_client;
 extern crate tokio_io;
 extern crate tokio_uds;
+
 
 use std::io::prelude::*;
 use std::io::Cursor;
@@ -13,9 +15,7 @@ use x11_client::*;
 use byteorder::{ByteOrder, BigEndian};
 use futures::{Future, Stream};
 use futures::stream::unfold;
-use tokio_uds::UnixStream;
 use tokio_core::reactor::Interval;
-use tokio_io::AsyncRead; // for .split()
 use tokio_io::io::{read_exact, write_all};
 
 const WIDTH: usize = 15;
@@ -59,15 +59,16 @@ fn main() {
 
     let interval = Interval::new(std::time::Duration::from_millis(100), &handle).unwrap();
 
-    let socket = UnixStream::connect("/tmp/.X11-unix/X0", &handle).unwrap();
     let client_init: Vec<_> = ClientInit::new().into();
-    let f = write_all(socket, &client_init).and_then(|(socket, _)| {
+    let client = x11::X11Client::connect_unix(&handle, 0).unwrap();
+
+    let f = write_all(client.write, &client_init).and_then(|(socket, _)| {
         let server_init_prefix = vec![0 as u8; 8];
 
         // TODO: the destructuring of the server response length really belongs
         // in x11_client, since it depends on the byteorder that it serialized
         // into ClientInit.
-        read_exact(socket, server_init_prefix)
+        read_exact(client.read, server_init_prefix)
             .and_then(|(socket, mut server_init_prefix)| {
                 assert_eq!(1, server_init_prefix[0]);
                 let length = BigEndian::read_u16(&server_init_prefix[6..8]);
@@ -101,7 +102,7 @@ fn main() {
                     0, // visual: CopyFromParent
                 ).as_bytes();
 
-                write_all(socket, create_window)
+                write_all(client.write, create_window)
                     .and_then(move |(socket, _)| {
                         write_all(socket, MapWindow::new(window).as_bytes())
                     })
@@ -126,9 +127,7 @@ fn main() {
                             TimerFired,
                         }
 
-                        let (read, mut write) = socket.split();
-
-                        let x11 = unfold(read, |read| {
+                        let x11 = unfold(client.read, |read| {
                             let f = read_exact(read, [0 as u8; 32]).map(|(socket, result)| {
                                 (Tick::X11Event(Event::from_bytes(&result)), socket)
                             });
@@ -145,7 +144,7 @@ fn main() {
                                     match event {
                                         Event::Expose { .. } => {
                                             dump(
-                                                &mut write,
+                                                &mut client.write,
                                                 &game,
                                                 window,
                                                 snake_gc,
@@ -171,7 +170,14 @@ fn main() {
                                 Tick::TimerFired => {
                                     println!("timer");
                                     game.tick();
-                                    dump(&mut write, &game, window, snake_gc, target_gc, bg_gc);
+                                    dump(
+                                        &mut client.write,
+                                        &game,
+                                        window,
+                                        snake_gc,
+                                        target_gc,
+                                        bg_gc,
+                                    );
                                 }
                             };
                             futures::future::ok::<_, std::io::Error>(())
