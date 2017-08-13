@@ -7,48 +7,47 @@ extern crate x11_client;
 extern crate tokio_io;
 extern crate tokio_uds;
 
-
-use std::io::prelude::*;
-use std::io::Cursor;
-
 use x11_client::*;
-use byteorder::{ByteOrder, BigEndian};
-use futures::{Future, Stream};
-use futures::stream::unfold;
+use futures::{Future, IntoFuture, Stream};
 use tokio_core::reactor::Interval;
-use tokio_io::io::{read_exact, write_all};
+use tokio_io::IoFuture;
 
 const WIDTH: usize = 15;
 const HEIGHT: usize = 15;
 const SNAKE_SIZE: usize = 16;
 
-fn dump<T: Write>(
-    stream: &mut T,
+fn dump(
+    client: x11::X11Client,
     game: &board::Game,
     window: u32,
     snake_gc: u32,
     target_gc: u32,
     bg_gc: u32,
-) {
-    for row in 0..HEIGHT {
-        for col in 0..WIDTH {
-            let gc = match game.at(col, row).unwrap() {
-                board::Cell::Empty => bg_gc,
-                board::Cell::Target => target_gc,
-                board::Cell::Snake(_) => snake_gc,
-            };
-            stream
-                .write_all(&PolyFillRectangle::new(
-                    window,
-                    gc,
-                    (col * SNAKE_SIZE) as i16,
-                    (row * SNAKE_SIZE) as i16,
-                    SNAKE_SIZE as u16,
-                    SNAKE_SIZE as u16,
-                ).as_bytes())
-                .unwrap();
-        }
-    }
+) -> IoFuture<x11::X11Client> {
+    let cells = (0..HEIGHT)
+        .flat_map(|row| {
+            (0..WIDTH).map(move |col| {
+                let gc = match game.at(col, row).unwrap() {
+                    board::Cell::Empty => bg_gc,
+                    board::Cell::Target => target_gc,
+                    board::Cell::Snake(_) => snake_gc,
+                };
+                Ok((row, col, gc))
+            })
+        })
+        .collect::<Vec<_>>();
+    futures::stream::iter(cells)
+        .fold(client, move |client, (row, col, gc)| {
+            client.poly_fill_rectangle(
+                window,
+                gc,
+                (col * SNAKE_SIZE) as i16,
+                (row * SNAKE_SIZE) as i16,
+                SNAKE_SIZE as u16,
+                SNAKE_SIZE as u16,
+            )
+        })
+        .boxed()
 }
 
 fn main() {
@@ -59,130 +58,71 @@ fn main() {
 
     let interval = Interval::new(std::time::Duration::from_millis(100), &handle).unwrap();
 
-    let client_init: Vec<_> = ClientInit::new().into();
-    let client = x11::X11Client::connect_unix(&handle, 0).unwrap();
+    let f = x11::connect_unix(&handle, 0).and_then(|(server_init, client, events)| {
+        let window = server_init.resource_id_base + 1;
+        let snake_gc = window + 1;
+        let bg_gc = snake_gc + 1;
+        let target_gc = bg_gc + 1;
 
-    let f = write_all(client.write, &client_init).and_then(|(socket, _)| {
-        let server_init_prefix = vec![0 as u8; 8];
+        client
+            .create_window(
+                24,
+                window,
+                server_init.roots[0].root,
+                0,
+                0,
+                (WIDTH * SNAKE_SIZE) as u16,
+                (HEIGHT * SNAKE_SIZE) as u16,
+                0, // border-width
+                1, // InputOutput
+                0, // visual: CopyFromParent
+            )
+            .and_then(move |client| client.map_window(window))
+            .and_then(move |client| client.change_wm_name(window, "Snake"))
+            .and_then(move |client| client.create_gc(snake_gc, window, 0x00AA00))
+            .and_then(move |client| client.create_gc(bg_gc, window, 0xFFFFFF))
+            .and_then(move |client| client.create_gc(target_gc, window, 0xee9922))
+            .and_then(move |client| {
+                enum Tick {
+                    X11Event(Event),
+                    TimerFired,
+                }
 
-        // TODO: the destructuring of the server response length really belongs
-        // in x11_client, since it depends on the byteorder that it serialized
-        // into ClientInit.
-        read_exact(client.read, server_init_prefix)
-            .and_then(|(socket, mut server_init_prefix)| {
-                assert_eq!(1, server_init_prefix[0]);
-                let length = BigEndian::read_u16(&server_init_prefix[6..8]);
-                read_exact(socket, vec![0 as u8; (length * 4) as usize])
-                    .and_then(move |(socket, mut server_init_rest)| {
-                        let mut server_init_data = Vec::new();
-                        server_init_data.append(&mut server_init_prefix);
-                        server_init_data.append(&mut server_init_rest);
+                let x11 = events.into_stream().map(|event| Tick::X11Event(event));
+                let timer = interval.map(|()| Tick::TimerFired);
 
-                        let server_init =
-                            ServerInit::from_stream(&mut Cursor::new(server_init_data)).unwrap();
-                        futures::future::ok((socket, server_init))
-                    })
-            })
-            .and_then(|(socket, server_init)| {
-                let window = server_init.resource_id_base + 1;
-                let snake_gc = window + 1;
-                let bg_gc = snake_gc + 1;
-                let target_gc = bg_gc + 1;
+                let read_or_tick = x11.select(timer);
 
-                let create_window = CreateWindow::new(
-                    24,
-                    window,
-                    server_init.roots[0].root,
-                    0,
-                    0,
-                    (WIDTH * SNAKE_SIZE) as u16,
-                    (HEIGHT * SNAKE_SIZE) as u16,
-                    0, // border-width
-                    1, // InputOutput
-                    0, // visual: CopyFromParent
-                ).as_bytes();
-
-                write_all(client.write, create_window)
-                    .and_then(move |(socket, _)| {
-                        write_all(socket, MapWindow::new(window).as_bytes())
-                    })
-                    .and_then(move |(socket, _)| {
-                        write_all(socket, ChangeWmName::new(window, "Snake".into()).as_bytes())
-                    })
-                    .and_then(move |(socket, _)| {
-                        write_all(socket, CreateGc::new(snake_gc, window, 0x00AA00).as_bytes())
-                    })
-                    .and_then(move |(socket, _)| {
-                        write_all(socket, CreateGc::new(bg_gc, window, 0xFFFFFF).as_bytes())
-                    })
-                    .and_then(move |(socket, _)| {
-                        write_all(
-                            socket,
-                            CreateGc::new(target_gc, window, 0xee9922).as_bytes(),
-                        )
-                    })
-                    .and_then(move |(socket, _)| {
-                        enum Tick {
-                            X11Event(Event),
-                            TimerFired,
+                read_or_tick.fold(client, move |client, tick| match tick {
+                    Tick::X11Event(event) => {
+                        println!("x11");
+                        match event {
+                            Event::Expose { .. } => {
+                                dump(client, &game, window, snake_gc, target_gc, bg_gc)
+                            }
+                            Event::KeyPress { detail: key, .. } => {
+                                use board::Direction::*;
+                                match key {
+                                    111 => game.set_direction(Up),
+                                    113 => game.set_direction(Left),
+                                    114 => game.set_direction(Right),
+                                    116 => game.set_direction(Down),
+                                    _ => (),
+                                };
+                                Ok(client).into_future().boxed()
+                            }
+                            _ => {
+                                println!("Unhandled event: {:?}", event);
+                                Ok(client).into_future().boxed()
+                            }
                         }
-
-                        let x11 = unfold(client.read, |read| {
-                            let f = read_exact(read, [0 as u8; 32]).map(|(socket, result)| {
-                                (Tick::X11Event(Event::from_bytes(&result)), socket)
-                            });
-                            Some(f)
-                        });
-                        let timer = interval.map(|()| Tick::TimerFired);
-
-                        let read_or_tick = x11.select(timer);
-
-                        read_or_tick.for_each(move |tick| {
-                            match tick {
-                                Tick::X11Event(event) => {
-                                    println!("x11");
-                                    match event {
-                                        Event::Expose { .. } => {
-                                            dump(
-                                                &mut client.write,
-                                                &game,
-                                                window,
-                                                snake_gc,
-                                                target_gc,
-                                                bg_gc,
-                                            )
-                                        }
-                                        Event::KeyPress { detail: key, .. } => {
-                                            use board::Direction::*;
-                                            match key {
-                                                111 => game.set_direction(Up),
-                                                113 => game.set_direction(Left),
-                                                114 => game.set_direction(Right),
-                                                116 => game.set_direction(Down),
-                                                _ => (),
-                                            }
-                                        }
-                                        _ => {
-                                            println!("Unhandled event: {:?}", event);
-                                        }
-                                    };
-                                }
-                                Tick::TimerFired => {
-                                    println!("timer");
-                                    game.tick();
-                                    dump(
-                                        &mut client.write,
-                                        &game,
-                                        window,
-                                        snake_gc,
-                                        target_gc,
-                                        bg_gc,
-                                    );
-                                }
-                            };
-                            futures::future::ok::<_, std::io::Error>(())
-                        })
-                    })
+                    }
+                    Tick::TimerFired => {
+                        println!("timer");
+                        game.tick();
+                        dump(client, &game, window, snake_gc, target_gc, bg_gc)
+                    }
+                })
             })
     });
 
