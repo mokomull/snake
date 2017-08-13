@@ -88,7 +88,7 @@ fn main() {
                     TimerFired,
                 }
 
-                let x11 = events.into_stream().map(|event| Tick::X11Event(event));
+                let x11 = events.into_stream().map(Tick::X11Event);
                 let timer = interval.map(|()| Tick::TimerFired);
 
                 let read_or_tick = x11.select(timer);
