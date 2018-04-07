@@ -1,11 +1,11 @@
 use std::io;
-use byteorder::{ByteOrder, BigEndian};
+use byteorder::{BigEndian, ByteOrder};
 use futures::{Future, IntoFuture};
 use futures::stream::unfold;
 use tokio_core::reactor::Handle;
 use tokio_uds::UnixStream;
 use tokio_io::{AsyncRead, IoFuture, IoStream};
-use tokio_io::io::{ReadHalf, WriteHalf, read_exact, write_all};
+use tokio_io::io::{read_exact, write_all, ReadHalf, WriteHalf};
 
 use x11_client::*;
 
@@ -102,9 +102,7 @@ impl X11Client {
         width: u16,
         height: u16,
     ) -> IoFuture<Self> {
-        self.write_all(
-            PolyFillRectangle::new(drawable, gc, x, y, width, height).as_bytes(),
-        )
+        self.write_all(PolyFillRectangle::new(drawable, gc, x, y, width, height).as_bytes())
     }
 }
 
@@ -132,20 +130,20 @@ impl X11Events {
             |(events, mut server_init_prefix)| {
                 assert_eq!(1, server_init_prefix[0]);
                 let length = BigEndian::read_u16(&server_init_prefix[6..8]);
-                events
-                    .read_exact(vec![0 as u8; (length * 4) as usize])
-                    .map(move |(events, mut server_init_rest)| {
+                events.read_exact(vec![0 as u8; (length * 4) as usize]).map(
+                    move |(events, mut server_init_rest)| {
                         let mut server_init_data = Vec::new();
                         server_init_data.append(&mut server_init_prefix);
                         server_init_data.append(&mut server_init_rest);
 
-                        let server_init = ServerInit::from_stream(
-                            &mut io::Cursor::new(server_init_data),
-                        ).unwrap();
+                        let server_init = ServerInit::from_stream(&mut io::Cursor::new(
+                            server_init_data,
+                        )).unwrap();
                         (events, server_init)
-                    })
-            })
-        )
+                    }
+                )
+            }
+        ))
     }
 
     pub fn into_stream(self) -> IoStream<Event> {

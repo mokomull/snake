@@ -3,9 +3,9 @@ mod x11;
 extern crate byteorder;
 extern crate futures;
 extern crate tokio_core;
-extern crate x11_client;
 extern crate tokio_io;
 extern crate tokio_uds;
+extern crate x11_client;
 
 use x11_client::*;
 use futures::{Future, IntoFuture, Stream};

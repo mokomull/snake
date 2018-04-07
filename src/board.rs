@@ -3,9 +3,7 @@ extern crate rand;
 // TODO: make Direction private - the UI won't need to know the snake's
 // direction.  I saw something about hiding enum contents at one point, but I
 // forgot where.
-#[derive(Clone)]
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Direction {
     Up = 1,
     Left = 2,
@@ -24,9 +22,7 @@ impl From<usize> for Direction {
     }
 }
 
-#[derive(Clone)]
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Cell {
     Empty,
     Target,
