@@ -32,12 +32,12 @@ fn dump(
                     board::Cell::Target => target_gc,
                     board::Cell::Snake(_) => snake_gc,
                 };
-                Ok((row, col, gc))
+                (row, col, gc)
             })
         })
         .collect::<Vec<_>>();
-    futures::stream::iter(cells)
-        .fold(client, move |client, (row, col, gc)| {
+    Box::new(
+        futures::stream::iter_ok(cells).fold(client, move |client, (row, col, gc)| {
             client.poly_fill_rectangle(
                 window,
                 gc,
@@ -46,8 +46,8 @@ fn dump(
                 SNAKE_SIZE as u16,
                 SNAKE_SIZE as u16,
             )
-        })
-        .boxed()
+        }),
+    )
 }
 
 fn main() {
@@ -109,11 +109,11 @@ fn main() {
                                     116 => game.set_direction(Down),
                                     _ => (),
                                 };
-                                Ok(client).into_future().boxed()
+                                Box::new(Ok(client).into_future())
                             }
                             _ => {
                                 println!("Unhandled event: {:?}", event);
-                                Ok(client).into_future().boxed()
+                                Box::new(Ok(client).into_future())
                             }
                         }
                     }

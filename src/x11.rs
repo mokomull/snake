@@ -1,6 +1,6 @@
 use std::io;
 use byteorder::{ByteOrder, BigEndian};
-use futures::{Future, IntoFuture, Stream};
+use futures::{Future, IntoFuture};
 use futures::stream::unfold;
 use tokio_core::reactor::Handle;
 use tokio_uds::UnixStream;
@@ -14,20 +14,21 @@ pub fn connect_unix(
     display: usize,
 ) -> IoFuture<(ServerInit, X11Client, X11Events)> {
     let path = format!("/tmp/.X11-unix/X{}", display);
-    UnixStream::connect(path, handle)
-        .into_future()
-        .and_then(|socket| {
-            let (read, write) = socket.split();
-            let client = X11Client { write: write };
-            let events = X11Events { read: read };
+    Box::new(
+        UnixStream::connect(path, handle)
+            .into_future()
+            .and_then(|socket| {
+                let (read, write) = socket.split();
+                let client = X11Client { write: write };
+                let events = X11Events { read: read };
 
-            client.write_init().and_then(move |client| {
-                events.read_init().map(move |(events, server_init)| {
-                    (server_init, client, events)
+                client.write_init().and_then(move |client| {
+                    events
+                        .read_init()
+                        .map(move |(events, server_init)| (server_init, client, events))
                 })
-            })
-        })
-        .boxed()
+            }),
+    )
 }
 
 pub struct X11Client {
@@ -42,9 +43,7 @@ impl X11Client {
     {
         let write = self.write;
 
-        write_all(write, buf)
-            .map(move |(socket, _)| Self { write: socket })
-            .boxed()
+        Box::new(write_all(write, buf).map(move |(socket, _)| Self { write: socket }))
     }
 
     fn write_init(self) -> IoFuture<Self> {
@@ -120,9 +119,7 @@ impl X11Events {
     {
         let read = self.read;
 
-        read_exact(read, buf)
-            .map(move |(socket, result)| (Self { read: socket }, result))
-            .boxed()
+        Box::new(read_exact(read, buf).map(move |(socket, result)| (Self { read: socket }, result)))
     }
 
     fn read_init(self) -> IoFuture<(Self, ServerInit)> {
@@ -131,8 +128,8 @@ impl X11Events {
         // TODO: the destructuring of the server response length really belongs
         // in x11_client, since it depends on the byteorder that it serialized
         // into ClientInit.
-        self.read_exact(server_init_prefix)
-            .and_then(|(events, mut server_init_prefix)| {
+        Box::new(self.read_exact(server_init_prefix).and_then(
+            |(events, mut server_init_prefix)| {
                 assert_eq!(1, server_init_prefix[0]);
                 let length = BigEndian::read_u16(&server_init_prefix[6..8]);
                 events
@@ -148,15 +145,14 @@ impl X11Events {
                         (events, server_init)
                     })
             })
-            .boxed()
+        )
     }
 
     pub fn into_stream(self) -> IoStream<Event> {
-        unfold(self.read, |read| {
-            let f = read_exact(read, [0 as u8; 32]).map(|(socket, result)| {
-                (Event::from_bytes(&result), socket)
-            });
+        Box::new(unfold(self.read, |read| {
+            let f = read_exact(read, [0 as u8; 32])
+                .map(|(socket, result)| (Event::from_bytes(&result), socket));
             Some(f)
-        }).boxed()
+        }))
     }
 }
