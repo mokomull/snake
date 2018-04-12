@@ -16,21 +16,19 @@ pub fn connect_unix(
     display: usize,
 ) -> impl Future<Item=(ServerInit, X11Client, X11Events), Error=Error> {
     let path = format!("/tmp/.X11-unix/X{}", display);
-    Box::new(
-        UnixStream::connect(path, handle)
-            .into_future()
-            .and_then(|socket| {
-                let (read, write) = socket.split();
-                let client = X11Client { write: write };
-                let events = X11Events { read: read };
+    UnixStream::connect(path, handle)
+        .into_future()
+        .and_then(|socket| {
+            let (read, write) = socket.split();
+            let client = X11Client { write: write };
+            let events = X11Events { read: read };
 
-                client.write_init().and_then(move |client| {
-                    events
-                        .read_init()
-                        .map(move |(events, server_init)| (server_init, client, events))
-                })
-            }),
-    )
+            client.write_init().and_then(move |client| {
+                events
+                    .read_init()
+                    .map(move |(events, server_init)| (server_init, client, events))
+            })
+        })
 }
 
 pub struct X11Client {
@@ -45,7 +43,7 @@ impl X11Client {
     {
         let write = self.write;
 
-        Box::new(write_all(write, buf).map(move |(socket, _)| Self { write: socket }))
+        write_all(write, buf).map(move |(socket, _)| Self { write: socket })
     }
 
     fn write_init(self) -> impl Future<Item=Self, Error=Error> {
@@ -119,7 +117,7 @@ impl X11Events {
     {
         let read = self.read;
 
-        Box::new(read_exact(read, buf).map(move |(socket, result)| (Self { read: socket }, result)))
+        read_exact(read, buf).map(move |(socket, result)| (Self { read: socket }, result))
     }
 
     fn read_init(self) -> impl Future<Item=(Self, ServerInit), Error=Error> {
@@ -128,7 +126,7 @@ impl X11Events {
         // TODO: the destructuring of the server response length really belongs
         // in x11_client, since it depends on the byteorder that it serialized
         // into ClientInit.
-        Box::new(self.read_exact(server_init_prefix).and_then(
+        self.read_exact(server_init_prefix).and_then(
             |(events, mut server_init_prefix)| {
                 assert_eq!(1, server_init_prefix[0]);
                 let length = BigEndian::read_u16(&server_init_prefix[6..8]);
@@ -145,14 +143,14 @@ impl X11Events {
                     }
                 )
             }
-        ))
+        )
     }
 
     pub fn into_stream(self) -> impl Stream<Item=Event, Error=Error> {
-        Box::new(unfold(self.read, |read| {
+        unfold(self.read, |read| {
             let f = read_exact(read, [0 as u8; 32])
                 .map(|(socket, result)| (Event::from_bytes(&result), socket));
             Some(f)
-        }))
+        })
     }
 }
