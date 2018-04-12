@@ -24,6 +24,9 @@ fn dump(
     target_gc: u32,
     bg_gc: u32,
 ) -> IoFuture<x11::X11Client> {
+    /* This function should continue to return a Box, because it is only used
+       in a context where a Box is necessary -- a closure which can return one
+       of multiple Future types depending on the event being processed */
     let cells = (0..HEIGHT)
         .flat_map(|row| {
             (0..WIDTH).map(move |col| {
