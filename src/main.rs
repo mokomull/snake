@@ -7,10 +7,10 @@ extern crate tokio_io;
 extern crate tokio_uds;
 extern crate x11_client;
 
-use x11_client::*;
 use futures::{Future, IntoFuture, Stream};
 use tokio_core::reactor::Interval;
 use tokio_io::IoFuture;
+use x11_client::*;
 
 const WIDTH: usize = 15;
 const HEIGHT: usize = 15;

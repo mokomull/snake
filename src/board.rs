@@ -176,8 +176,8 @@ impl Game {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use super::Cell::*;
+    use super::*;
 
     #[test]
     fn i_have_no_idea_what_im_doing() {

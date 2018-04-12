@@ -1,11 +1,11 @@
-use std::io;
 use byteorder::{BigEndian, ByteOrder};
-use futures::{Future, IntoFuture};
 use futures::stream::unfold;
+use futures::{Future, IntoFuture};
+use std::io;
 use tokio_core::reactor::Handle;
-use tokio_uds::UnixStream;
-use tokio_io::{AsyncRead, IoFuture, IoStream};
 use tokio_io::io::{read_exact, write_all, ReadHalf, WriteHalf};
+use tokio_io::{AsyncRead, IoFuture, IoStream};
+use tokio_uds::UnixStream;
 
 use x11_client::*;
 
