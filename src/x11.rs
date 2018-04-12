@@ -1,18 +1,20 @@
 use byteorder::{BigEndian, ByteOrder};
 use futures::stream::unfold;
-use futures::{Future, IntoFuture};
+use futures::{Future, IntoFuture, Stream};
 use std::io;
 use tokio_core::reactor::Handle;
 use tokio_io::io::{read_exact, write_all, ReadHalf, WriteHalf};
-use tokio_io::{AsyncRead, IoFuture, IoStream};
+use tokio_io::AsyncRead;
 use tokio_uds::UnixStream;
 
 use x11_client::*;
 
+type Error = io::Error;
+
 pub fn connect_unix(
     handle: &Handle,
     display: usize,
-) -> IoFuture<(ServerInit, X11Client, X11Events)> {
+) -> impl Future<Item=(ServerInit, X11Client, X11Events), Error=Error> {
     let path = format!("/tmp/.X11-unix/X{}", display);
     Box::new(
         UnixStream::connect(path, handle)
@@ -37,7 +39,7 @@ pub struct X11Client {
 
 impl X11Client {
     // TODO: I have no idea why the compiler wants 'static here
-    fn write_all<T>(self, buf: T) -> IoFuture<Self>
+    fn write_all<T>(self, buf: T) -> impl Future<Item=Self, Error=Error>
     where
         T: AsRef<[u8]> + Send + 'static,
     {
@@ -46,7 +48,7 @@ impl X11Client {
         Box::new(write_all(write, buf).map(move |(socket, _)| Self { write: socket }))
     }
 
-    fn write_init(self) -> IoFuture<Self> {
+    fn write_init(self) -> impl Future<Item=Self, Error=Error> {
         let client_init: Vec<_> = ClientInit::new().into();
         self.write_all(client_init)
     }
@@ -64,7 +66,7 @@ impl X11Client {
         border_width: u16,
         class: u16,
         visual: u32,
-    ) -> IoFuture<Self> {
+    ) -> impl Future<Item=Self, Error=Error> {
         self.write_all(
             CreateWindow::new(
                 depth,
@@ -81,15 +83,15 @@ impl X11Client {
         )
     }
 
-    pub fn map_window(self, window: u32) -> IoFuture<Self> {
+    pub fn map_window(self, window: u32) -> impl Future<Item=Self, Error=Error> {
         self.write_all(MapWindow::new(window).as_bytes())
     }
 
-    pub fn change_wm_name(self, window: u32, name: &str) -> IoFuture<Self> {
+    pub fn change_wm_name(self, window: u32, name: &str) -> impl Future<Item=Self, Error=Error> {
         self.write_all(ChangeWmName::new(window, name.into()).as_bytes())
     }
 
-    pub fn create_gc(self, gc_id: u32, window: u32, color: u32) -> IoFuture<Self> {
+    pub fn create_gc(self, gc_id: u32, window: u32, color: u32) -> impl Future<Item=Self, Error=Error> {
         self.write_all(CreateGc::new(gc_id, window, color).as_bytes())
     }
 
@@ -101,7 +103,7 @@ impl X11Client {
         y: i16,
         width: u16,
         height: u16,
-    ) -> IoFuture<Self> {
+    ) -> impl Future<Item=Self, Error=Error> {
         self.write_all(PolyFillRectangle::new(drawable, gc, x, y, width, height).as_bytes())
     }
 }
@@ -111,7 +113,7 @@ pub struct X11Events {
 }
 
 impl X11Events {
-    fn read_exact<T>(self, buf: T) -> IoFuture<(Self, T)>
+    fn read_exact<T>(self, buf: T) -> impl Future<Item=(Self, T), Error=Error>
     where
         T: AsMut<[u8]> + Send + 'static,
     {
@@ -120,7 +122,7 @@ impl X11Events {
         Box::new(read_exact(read, buf).map(move |(socket, result)| (Self { read: socket }, result)))
     }
 
-    fn read_init(self) -> IoFuture<(Self, ServerInit)> {
+    fn read_init(self) -> impl Future<Item=(Self, ServerInit), Error=Error> {
         let server_init_prefix = vec![0 as u8; 8];
 
         // TODO: the destructuring of the server response length really belongs
@@ -146,7 +148,7 @@ impl X11Events {
         ))
     }
 
-    pub fn into_stream(self) -> IoStream<Event> {
+    pub fn into_stream(self) -> impl Stream<Item=Event, Error=Error> {
         Box::new(unfold(self.read, |read| {
             let f = read_exact(read, [0 as u8; 32])
                 .map(|(socket, result)| (Event::from_bytes(&result), socket));
