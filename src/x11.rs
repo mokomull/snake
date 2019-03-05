@@ -1,15 +1,13 @@
 use byteorder::{BigEndian, ByteOrder};
 use futures::stream::unfold;
 use futures::{Future, IntoFuture, Stream};
-use std::io;
+use std::io::{self, Error};
 use tokio_core::reactor::Handle;
 use tokio_io::io::{read_exact, write_all, ReadHalf, WriteHalf};
 use tokio_io::AsyncRead;
 use tokio_uds::UnixStream;
 
 use x11_client::*;
-
-type Error = io::Error;
 
 pub fn connect_unix(
     handle: &Handle,
@@ -20,8 +18,8 @@ pub fn connect_unix(
         .into_future()
         .and_then(|socket| {
             let (read, write) = socket.split();
-            let client = X11Client { write: write };
-            let events = X11Events { read: read };
+            let client = X11Client { write };
+            let events = X11Events { read };
 
             client.write_init().and_then(move |client| {
                 events
@@ -52,6 +50,7 @@ impl X11Client {
     }
 
     // TODO: x and y are INT16, not CARD16
+    #[allow(clippy::too_many_arguments)] // since these all come from X11, not me :)
     pub fn create_window(
         self,
         depth: u8,

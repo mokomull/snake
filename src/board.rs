@@ -41,7 +41,7 @@ impl Board {
             board.push(vec![Empty; width])
         }
 
-        Board { board: board }
+        Board { board }
     }
 
     pub fn at(&self, column: usize, row: usize) -> Option<Cell> {
@@ -70,11 +70,11 @@ impl Game {
         board.board[row][column] = Snake(Direction::Down);
 
         Game {
-            board: board,
+            board,
             head: (column, row),
             tail: (column, row),
-            width: width,
-            height: height,
+            width,
+            height,
         }
     }
 

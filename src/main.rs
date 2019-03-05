@@ -76,9 +76,9 @@ fn main() {
             )
             .and_then(move |client| client.map_window(window))
             .and_then(move |client| client.change_wm_name(window, "Snake"))
-            .and_then(move |client| client.create_gc(snake_gc, window, 0x00AA00))
-            .and_then(move |client| client.create_gc(bg_gc, window, 0xFFFFFF))
-            .and_then(move |client| client.create_gc(target_gc, window, 0xee9922))
+            .and_then(move |client| client.create_gc(snake_gc, window, 0x00_AA_00))
+            .and_then(move |client| client.create_gc(bg_gc, window, 0xFF_FF_FF))
+            .and_then(move |client| client.create_gc(target_gc, window, 0xee_99_22))
             .and_then(move |client| {
                 enum Tick {
                     X11Event(Event),
