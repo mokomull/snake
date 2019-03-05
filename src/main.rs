@@ -1,11 +1,5 @@
 mod board;
 mod x11;
-extern crate byteorder;
-extern crate futures;
-extern crate tokio_core;
-extern crate tokio_io;
-extern crate tokio_uds;
-extern crate x11_client;
 
 use futures::{Future, IntoFuture, Stream};
 use tokio_core::reactor::Interval;
@@ -104,7 +98,7 @@ fn main() {
                                 dump(client, &game, window, snake_gc, target_gc, bg_gc)
                             }
                             Event::KeyPress { detail: key, .. } => {
-                                use board::Direction::*;
+                                use crate::board::Direction::*;
                                 match key {
                                     111 => game.set_direction(Up),
                                     113 => game.set_direction(Left),

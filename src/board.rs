@@ -1,5 +1,3 @@
-extern crate rand;
-
 // TODO: make Direction private - the UI won't need to know the snake's
 // direction.  I saw something about hiding enum contents at one point, but I
 // forgot where.
@@ -125,7 +123,7 @@ impl Game {
                         let mut rng = rand::thread_rng();
                         let mut col_range = rand::distributions::Range::new(0, self.width);
                         let mut row_range = rand::distributions::Range::new(0, self.height);
-                        use board::rand::distributions::Sample;
+                        use rand::distributions::Sample;
                         loop {
                             let (new_col, new_row) =
                                 (col_range.sample(&mut rng), row_range.sample(&mut rng));
