@@ -1,21 +1,17 @@
 use byteorder::{BigEndian, ByteOrder};
 use futures::stream::unfold;
-use futures::{Future, IntoFuture, Stream};
+use futures::{Future, Stream};
 use std::io::{self, Error};
-use tokio_core::reactor::Handle;
-use tokio_io::io::{read_exact, write_all, ReadHalf, WriteHalf};
-use tokio_io::AsyncRead;
-use tokio_uds::UnixStream;
+use tokio::io::{read_exact, write_all, AsyncRead, ReadHalf, WriteHalf};
+use tokio::net::UnixStream;
 
 use x11_client::*;
 
 pub fn connect_unix(
-    handle: &Handle,
     display: usize,
 ) -> impl Future<Item = (ServerInit, X11Client, X11Events), Error = Error> {
     let path = format!("/tmp/.X11-unix/X{}", display);
-    UnixStream::connect(path, handle)
-        .into_future()
+    UnixStream::connect(path)
         .and_then(|socket| {
             let (read, write) = socket.split();
             let client = X11Client { write };

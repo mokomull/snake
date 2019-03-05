@@ -2,8 +2,7 @@ mod board;
 mod x11;
 
 use futures::{Future, IntoFuture, Stream};
-use tokio_core::reactor::Interval;
-use tokio_io::IoFuture;
+use tokio::timer::Interval;
 use x11_client::*;
 
 const WIDTH: usize = 15;
@@ -17,7 +16,7 @@ fn dump(
     snake_gc: u32,
     target_gc: u32,
     bg_gc: u32,
-) -> IoFuture<x11::X11Client> {
+) -> Box<dyn Future<Item = x11::X11Client, Error = std::io::Error> + Send> {
     /* This function should continue to return a Box, because it is only used
     in a context where a Box is necessary -- a closure which can return one
     of multiple Future types depending on the event being processed */
@@ -50,12 +49,9 @@ fn dump(
 fn main() {
     let mut game = board::Game::new(WIDTH, HEIGHT);
 
-    let mut core = tokio_core::reactor::Core::new().unwrap();
-    let handle = core.handle();
+    let interval = Interval::new_interval(std::time::Duration::from_millis(100));
 
-    let interval = Interval::new(std::time::Duration::from_millis(100), &handle).unwrap();
-
-    let f = x11::connect_unix(&handle, 0).and_then(|(server_init, client, events)| {
+    let f = x11::connect_unix(0).and_then(|(server_init, client, events)| {
         let window = server_init.resource_id_base + 1;
         let snake_gc = window + 1;
         let bg_gc = snake_gc + 1;
@@ -86,7 +82,8 @@ fn main() {
                 }
 
                 let x11 = events.into_stream().map(Tick::X11Event);
-                let timer = interval.map(|()| Tick::TimerFired);
+                let timer = interval.map(|_| Tick::TimerFired)
+                    .map_err(|e| panic!("timer failed for no good reason: {:?}", e));
 
                 let read_or_tick = x11.select(timer);
 
@@ -121,9 +118,11 @@ fn main() {
                     }
                 })
             })
-    });
+    })
+    .map(|_| ())
+    .map_err(|e| panic!("the stream ended unexpectedly: {:?}", e));
 
-    core.run(f).unwrap();
+    tokio::run(f);
 }
 
 #[test]
