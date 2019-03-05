@@ -11,18 +11,17 @@ pub fn connect_unix(
     display: usize,
 ) -> impl Future<Item = (ServerInit, X11Client, X11Events), Error = Error> {
     let path = format!("/tmp/.X11-unix/X{}", display);
-    UnixStream::connect(path)
-        .and_then(|socket| {
-            let (read, write) = socket.split();
-            let client = X11Client { write };
-            let events = X11Events { read };
+    UnixStream::connect(path).and_then(|socket| {
+        let (read, write) = socket.split();
+        let client = X11Client { write };
+        let events = X11Events { read };
 
-            client.write_init().and_then(move |client| {
-                events
-                    .read_init()
-                    .map(move |(events, server_init)| (server_init, client, events))
-            })
+        client.write_init().and_then(move |client| {
+            events
+                .read_init()
+                .map(move |(events, server_init)| (server_init, client, events))
         })
+    })
 }
 
 pub struct X11Client {
