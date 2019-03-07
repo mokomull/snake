@@ -1,29 +1,27 @@
 #![feature(async_await, await_macro, futures_api)]
-mod board;
-mod x11;
-
-use futures::{Future, IntoFuture, Stream};
-use tokio::timer::Interval;
-use x11_client::*;
 
 #[macro_use]
 extern crate tokio;
+
+mod board;
+mod x11;
+
+use futures::Stream;
+use tokio::timer::Interval;
+use x11_client::*;
 
 const WIDTH: usize = 15;
 const HEIGHT: usize = 15;
 const SNAKE_SIZE: usize = 16;
 
-fn dump(
-    client: x11::X11Client,
-    game: &board::Game,
+async fn dump<'a>(
+    client: &'a mut x11::X11Client,
+    game: &'a board::Game,
     window: u32,
     snake_gc: u32,
     target_gc: u32,
     bg_gc: u32,
-) -> Box<dyn Future<Item = x11::X11Client, Error = std::io::Error> + Send> {
-    /* This function should continue to return a Box, because it is only used
-    in a context where a Box is necessary -- a closure which can return one
-    of multiple Future types depending on the event being processed */
+) -> std::io::Result<()> {
     let cells = (0..HEIGHT)
         .flat_map(|row| {
             (0..WIDTH).map(move |col| {
@@ -36,18 +34,18 @@ fn dump(
             })
         })
         .collect::<Vec<_>>();
-    Box::new(
-        futures::stream::iter_ok(cells).fold(client, move |client, (row, col, gc)| {
-            client.poly_fill_rectangle(
-                window,
-                gc,
-                (col * SNAKE_SIZE) as i16,
-                (row * SNAKE_SIZE) as i16,
-                SNAKE_SIZE as u16,
-                SNAKE_SIZE as u16,
-            )
-        }),
-    )
+
+    for &(row, col, gc) in &cells {
+        await!(client.poly_fill_rectangle(
+            window,
+            gc,
+            (col * SNAKE_SIZE) as i16,
+            (row * SNAKE_SIZE) as i16,
+            SNAKE_SIZE as u16,
+            SNAKE_SIZE as u16,
+        ))?;
+    }
+    Ok(())
 }
 
 fn main() {
@@ -55,15 +53,15 @@ fn main() {
 
     let interval = Interval::new_interval(std::time::Duration::from_millis(100));
 
-    let f = async || -> std::io::Result<()> {
-        let (server_init, client, events) = await!(x11::connect_unix(0))?;
+    let f = async move || -> std::io::Result<()> {
+        let (server_init, mut client, events) = await!(x11::connect_unix(0))?;
 
         let window = server_init.resource_id_base + 1;
         let snake_gc = window + 1;
         let bg_gc = snake_gc + 1;
         let target_gc = bg_gc + 1;
 
-        let client = await!(client.create_window(
+        await!(client.create_window(
             24,
             window,
             server_init.roots[0].root,
@@ -76,11 +74,11 @@ fn main() {
             0, // visual: CopyFromParent
         ))?;
 
-        let client = await!(client.map_window(window))?;
-        let client = await!(client.change_wm_name(window, "Snake"))?;
-        let client = await!(client.create_gc(snake_gc, window, 0x00_AA_00))?;
-        let client = await!(client.create_gc(bg_gc, window, 0xFF_FF_FF))?;
-        let client = await!(client.create_gc(target_gc, window, 0xee_99_22))?;
+        await!(client.map_window(window))?;
+        await!(client.change_wm_name(window, "Snake"))?;
+        await!(client.create_gc(snake_gc, window, 0x00_AA_00))?;
+        await!(client.create_gc(bg_gc, window, 0xFF_FF_FF))?;
+        await!(client.create_gc(target_gc, window, 0xee_99_22))?;
 
         enum Tick {
             X11Event(Event),
@@ -92,37 +90,53 @@ fn main() {
             .map(|_| Tick::TimerFired)
             .map_err(|e| panic!("timer failed for no good reason: {:?}", e));
 
-        let read_or_tick = x11.select(timer);
+        let mut read_or_tick = x11.select(timer);
 
-        await!(read_or_tick.fold(client, move |client, tick| match tick {
-            Tick::X11Event(event) => {
-                println!("x11");
-                match event {
-                    Event::Expose { .. } => dump(client, &game, window, snake_gc, target_gc, bg_gc),
-                    Event::KeyPress { detail: key, .. } => {
-                        use crate::board::Direction::*;
-                        match key {
-                            111 => game.set_direction(Up),
-                            113 => game.set_direction(Left),
-                            114 => game.set_direction(Right),
-                            116 => game.set_direction(Down),
-                            _ => (),
-                        };
-                        Box::new(Ok(client).into_future())
-                    }
-                    _ => {
-                        println!("Unhandled event: {:?}", event);
-                        Box::new(Ok(client).into_future())
+        loop {
+            let event = await!(read_or_tick.into_future());
+            match event {
+                Err(x) => return Err(x.0),
+                Ok((tick, new_stream)) => {
+                    read_or_tick = new_stream;
+                    match tick {
+                        Some(Tick::X11Event(event)) => {
+                            println!("x11");
+                            match event {
+                                Event::Expose { .. } => await!(dump(
+                                    &mut client,
+                                    &game,
+                                    window,
+                                    snake_gc,
+                                    target_gc,
+                                    bg_gc
+                                ))?,
+                                Event::KeyPress { detail: key, .. } => {
+                                    use crate::board::Direction::*;
+                                    match key {
+                                        111 => game.set_direction(Up),
+                                        113 => game.set_direction(Left),
+                                        114 => game.set_direction(Right),
+                                        116 => game.set_direction(Down),
+                                        _ => (),
+                                    };
+                                }
+                                _ => {
+                                    println!("Unhandled event: {:?}", event);
+                                }
+                            }
+                        }
+                        Some(Tick::TimerFired) => {
+                            println!("timer");
+                            game.tick();
+                            await!(dump(&mut client, &game, window, snake_gc, target_gc, bg_gc))?;
+                        }
+                        None => {
+                            println!("why would a stream yield None?");
+                        }
                     }
                 }
             }
-            Tick::TimerFired => {
-                println!("timer");
-                game.tick();
-                dump(client, &game, window, snake_gc, target_gc, bg_gc)
-            }
-        }))?;
-        Ok(())
+        }
     };
 
     tokio::run_async(
