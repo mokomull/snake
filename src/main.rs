@@ -1,9 +1,13 @@
+#![feature(async_await, await_macro, futures_api)]
 mod board;
 mod x11;
 
 use futures::{Future, IntoFuture, Stream};
 use tokio::timer::Interval;
 use x11_client::*;
+
+#[macro_use]
+extern crate tokio;
 
 const WIDTH: usize = 15;
 const HEIGHT: usize = 15;
@@ -51,80 +55,81 @@ fn main() {
 
     let interval = Interval::new_interval(std::time::Duration::from_millis(100));
 
-    let f = x11::connect_unix(0)
-        .and_then(|(server_init, client, events)| {
-            let window = server_init.resource_id_base + 1;
-            let snake_gc = window + 1;
-            let bg_gc = snake_gc + 1;
-            let target_gc = bg_gc + 1;
+    let f = async || -> std::io::Result<()> {
+        let (server_init, client, events) = await!(x11::connect_unix(0))?;
 
-            client
-                .create_window(
-                    24,
-                    window,
-                    server_init.roots[0].root,
-                    0,
-                    0,
-                    (WIDTH * SNAKE_SIZE) as u16,
-                    (HEIGHT * SNAKE_SIZE) as u16,
-                    0, // border-width
-                    1, // InputOutput
-                    0, // visual: CopyFromParent
-                )
-                .and_then(move |client| client.map_window(window))
-                .and_then(move |client| client.change_wm_name(window, "Snake"))
-                .and_then(move |client| client.create_gc(snake_gc, window, 0x00_AA_00))
-                .and_then(move |client| client.create_gc(bg_gc, window, 0xFF_FF_FF))
-                .and_then(move |client| client.create_gc(target_gc, window, 0xee_99_22))
-                .and_then(move |client| {
-                    enum Tick {
-                        X11Event(Event),
-                        TimerFired,
+        let window = server_init.resource_id_base + 1;
+        let snake_gc = window + 1;
+        let bg_gc = snake_gc + 1;
+        let target_gc = bg_gc + 1;
+
+        let client = await!(client.create_window(
+            24,
+            window,
+            server_init.roots[0].root,
+            0,
+            0,
+            (WIDTH * SNAKE_SIZE) as u16,
+            (HEIGHT * SNAKE_SIZE) as u16,
+            0, // border-width
+            1, // InputOutput
+            0, // visual: CopyFromParent
+        ))?;
+
+        let client = await!(client.map_window(window))?;
+        let client = await!(client.change_wm_name(window, "Snake"))?;
+        let client = await!(client.create_gc(snake_gc, window, 0x00_AA_00))?;
+        let client = await!(client.create_gc(bg_gc, window, 0xFF_FF_FF))?;
+        let client = await!(client.create_gc(target_gc, window, 0xee_99_22))?;
+
+        enum Tick {
+            X11Event(Event),
+            TimerFired,
+        }
+
+        let x11 = events.into_stream().map(Tick::X11Event);
+        let timer = interval
+            .map(|_| Tick::TimerFired)
+            .map_err(|e| panic!("timer failed for no good reason: {:?}", e));
+
+        let read_or_tick = x11.select(timer);
+
+        await!(read_or_tick.fold(client, move |client, tick| match tick {
+            Tick::X11Event(event) => {
+                println!("x11");
+                match event {
+                    Event::Expose { .. } => dump(client, &game, window, snake_gc, target_gc, bg_gc),
+                    Event::KeyPress { detail: key, .. } => {
+                        use crate::board::Direction::*;
+                        match key {
+                            111 => game.set_direction(Up),
+                            113 => game.set_direction(Left),
+                            114 => game.set_direction(Right),
+                            116 => game.set_direction(Down),
+                            _ => (),
+                        };
+                        Box::new(Ok(client).into_future())
                     }
+                    _ => {
+                        println!("Unhandled event: {:?}", event);
+                        Box::new(Ok(client).into_future())
+                    }
+                }
+            }
+            Tick::TimerFired => {
+                println!("timer");
+                game.tick();
+                dump(client, &game, window, snake_gc, target_gc, bg_gc)
+            }
+        }))?;
+        Ok(())
+    };
 
-                    let x11 = events.into_stream().map(Tick::X11Event);
-                    let timer = interval
-                        .map(|_| Tick::TimerFired)
-                        .map_err(|e| panic!("timer failed for no good reason: {:?}", e));
-
-                    let read_or_tick = x11.select(timer);
-
-                    read_or_tick.fold(client, move |client, tick| match tick {
-                        Tick::X11Event(event) => {
-                            println!("x11");
-                            match event {
-                                Event::Expose { .. } => {
-                                    dump(client, &game, window, snake_gc, target_gc, bg_gc)
-                                }
-                                Event::KeyPress { detail: key, .. } => {
-                                    use crate::board::Direction::*;
-                                    match key {
-                                        111 => game.set_direction(Up),
-                                        113 => game.set_direction(Left),
-                                        114 => game.set_direction(Right),
-                                        116 => game.set_direction(Down),
-                                        _ => (),
-                                    };
-                                    Box::new(Ok(client).into_future())
-                                }
-                                _ => {
-                                    println!("Unhandled event: {:?}", event);
-                                    Box::new(Ok(client).into_future())
-                                }
-                            }
-                        }
-                        Tick::TimerFired => {
-                            println!("timer");
-                            game.tick();
-                            dump(client, &game, window, snake_gc, target_gc, bg_gc)
-                        }
-                    })
-                })
-        })
-        .map(|_| ())
-        .map_err(|e| panic!("the stream ended unexpectedly: {:?}", e));
-
-    tokio::run(f);
+    tokio::run_async(
+        async move {
+            await!(f()).expect("future should succeed");
+        },
+    );
 }
 
 #[test]

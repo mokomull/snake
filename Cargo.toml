@@ -9,5 +9,5 @@ rand = "0.3"
 x11_client = { git = "https://github.com/mokomull/x11_client.git" }
 byteorder = "1.0"
 futures = "0.1.7"
-tokio = { version = "0.1.15" }
+tokio = { version = "0.1.15", features = ["async-await-preview"] }
 tokio-uds = "0.1.1"
