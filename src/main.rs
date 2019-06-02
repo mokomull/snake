@@ -138,7 +138,7 @@ fn main() {
     tokio::run(Compat::new(Box::pin(async move {
         match f().await {
             Err(e) => panic!("I/O error: {}", e),
-            Ok(x) => Ok(x),
+            Ok(()) => Ok(()),
         }
     })));
 }

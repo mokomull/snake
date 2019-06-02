@@ -109,7 +109,7 @@ impl X11Events {
     where
         T: AsMut<[u8]>,
     {
-        let () = self.read.read_exact(buf.as_mut()).await?;
+        self.read.read_exact(buf.as_mut()).await?;
         Ok(buf)
     }
 
@@ -136,7 +136,7 @@ impl X11Events {
     pub fn into_stream(self) -> impl Stream<Item = Event> {
         Box::pin(unfold(self.read, async move |mut read| {
             let mut buf = [0 as u8; 32];
-            let () = read.read_exact(&mut buf).await.ok()?;
+            read.read_exact(&mut buf).await.ok()?;
             Some((Event::from_bytes(&buf), read))
         }))
     }
