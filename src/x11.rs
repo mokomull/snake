@@ -1,6 +1,8 @@
 use byteorder::{BigEndian, ByteOrder};
 use futures::compat::{AsyncRead01CompatExt, Future01CompatExt};
 use futures::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
+use futures::stream::unfold;
+use futures::Stream;
 use std::io::{self, Result};
 use tokio::net::UnixStream;
 
@@ -131,9 +133,11 @@ impl X11Events {
         Ok(server_init)
     }
 
-    pub async fn get_event(&mut self) -> Result<Event> {
-        let mut buf = [0 as u8; 32];
-        self.read.read_exact(&mut buf).await?;
-        Ok(Event::from_bytes(&buf))
+    pub fn into_stream(self) -> impl Stream<Item = Event> {
+        Box::pin(unfold(self.read, async move |mut read| {
+            let mut buf = [0 as u8; 32];
+            read.read_exact(&mut buf).await.ok()?;
+            Some((Event::from_bytes(&buf), read))
+        }))
     }
 }
