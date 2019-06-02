@@ -1,26 +1,27 @@
 use byteorder::{BigEndian, ByteOrder};
+use futures::compat::{AsyncRead01CompatExt, Future01CompatExt};
+use futures::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use futures::stream::unfold;
-use futures::{Future, Stream};
+use futures::Stream;
 use std::io::{self, Result};
-use tokio::io::{read_exact, write_all, AsyncRead, ReadHalf, WriteHalf};
 use tokio::net::UnixStream;
 
 use x11_client::*;
 
 pub async fn connect_unix(display: usize) -> Result<(ServerInit, X11Client, X11Events)> {
     let path = format!("/tmp/.X11-unix/X{}", display);
-    let socket = await!(UnixStream::connect(path))?;
-    let (read, write) = socket.split();
+    let socket = UnixStream::connect(path).compat().await?;
+    let (read, write) = socket.compat().split();
     let mut client = X11Client { write };
     let mut events = X11Events { read };
 
-    await!(client.write_init())?;
-    let server_init = await!(events.read_init())?;
+    client.write_init().await?;
+    let server_init = events.read_init().await?;
     Ok((server_init, client, events))
 }
 
 pub struct X11Client {
-    write: WriteHalf<UnixStream>,
+    write: WriteHalf<futures::compat::Compat01As03<UnixStream>>,
 }
 
 impl X11Client {
@@ -29,13 +30,13 @@ impl X11Client {
     where
         T: AsRef<[u8]> + Send + 'static,
     {
-        await!(write_all(&mut self.write, buf))?;
+        self.write.write_all(buf.as_ref()).await?;
         Ok(())
     }
 
     async fn write_init(&mut self) -> Result<()> {
         let client_init: Vec<_> = ClientInit::new().into();
-        await!(self.write_all(client_init))
+        self.write_all(client_init).await
     }
 
     // TODO: x and y are INT16, not CARD16
@@ -53,7 +54,7 @@ impl X11Client {
         class: u16,
         visual: u32,
     ) -> std::io::Result<()> {
-        await!(self.write_all(
+        self.write_all(
             CreateWindow::new(
                 depth,
                 window,
@@ -67,19 +68,22 @@ impl X11Client {
                 visual,
             )
             .as_bytes(),
-        ))
+        )
+        .await
     }
 
     pub async fn map_window(&mut self, window: u32) -> std::io::Result<()> {
-        await!(self.write_all(MapWindow::new(window).as_bytes()))
+        self.write_all(MapWindow::new(window).as_bytes()).await
     }
 
     pub async fn change_wm_name<'a>(&'a mut self, window: u32, name: &'a str) -> Result<()> {
-        await!(self.write_all(ChangeWmName::new(window, name.into()).as_bytes()))
+        self.write_all(ChangeWmName::new(window, name.into()).as_bytes())
+            .await
     }
 
     pub async fn create_gc(&mut self, gc_id: u32, window: u32, color: u32) -> Result<()> {
-        await!(self.write_all(CreateGc::new(gc_id, window, color).as_bytes()))
+        self.write_all(CreateGc::new(gc_id, window, color).as_bytes())
+            .await
     }
 
     pub async fn poly_fill_rectangle(
@@ -91,21 +95,22 @@ impl X11Client {
         width: u16,
         height: u16,
     ) -> Result<()> {
-        await!(self.write_all(PolyFillRectangle::new(drawable, gc, x, y, width, height).as_bytes()))
+        self.write_all(PolyFillRectangle::new(drawable, gc, x, y, width, height).as_bytes())
+            .await
     }
 }
 
 pub struct X11Events {
-    read: ReadHalf<UnixStream>,
+    read: ReadHalf<futures::compat::Compat01As03<UnixStream>>,
 }
 
 impl X11Events {
-    async fn read_exact<T>(&mut self, buf: T) -> Result<T>
+    async fn read_exact<T>(&mut self, mut buf: T) -> Result<T>
     where
-        T: AsMut<[u8]> + Send + 'static,
+        T: AsMut<[u8]>,
     {
-        let (_, result) = await!(read_exact(&mut self.read, buf))?;
-        Ok(result)
+        let () = self.read.read_exact(buf.as_mut()).await?;
+        Ok(buf)
     }
 
     async fn read_init(&mut self) -> Result<ServerInit> {
@@ -114,10 +119,12 @@ impl X11Events {
         // TODO: the destructuring of the server response length really belongs
         // in x11_client, since it depends on the byteorder that it serialized
         // into ClientInit.
-        let mut server_init_prefix = await!(self.read_exact(server_init_prefix))?;
+        let mut server_init_prefix = self.read_exact(server_init_prefix).await?;
         assert_eq!(1, server_init_prefix[0]);
         let length = BigEndian::read_u16(&server_init_prefix[6..8]);
-        let mut server_init_rest = await!(self.read_exact(vec![0 as u8; (length * 4) as usize]))?;
+        let mut server_init_rest = self
+            .read_exact(vec![0 as u8; (length * 4) as usize])
+            .await?;
         let mut server_init_data = Vec::new();
         server_init_data.append(&mut server_init_prefix);
         server_init_data.append(&mut server_init_rest);
@@ -126,11 +133,11 @@ impl X11Events {
         Ok(server_init)
     }
 
-    pub fn into_stream(self) -> impl Stream<Item = Event, Error = std::io::Error> {
-        unfold(self.read, |read| {
-            let f = read_exact(read, [0 as u8; 32])
-                .map(|(socket, result)| (Event::from_bytes(&result), socket));
-            Some(f)
-        })
+    pub fn into_stream(self) -> impl Stream<Item = Event> {
+        Box::pin(unfold(self.read, async move |mut read| {
+            let mut buf = [0 as u8; 32];
+            let () = read.read_exact(&mut buf).await.ok()?;
+            Some((Event::from_bytes(&buf), read))
+        }))
     }
 }

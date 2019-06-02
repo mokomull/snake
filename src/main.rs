@@ -1,12 +1,10 @@
-#![feature(async_await, await_macro, futures_api)]
-
-#[macro_use]
-extern crate tokio;
+#![feature(async_await)]
 
 mod board;
 mod x11;
 
-use futures::Stream;
+use futures::compat::{Compat, Stream01CompatExt};
+use futures::stream::StreamExt;
 use tokio::timer::Interval;
 use x11_client::*;
 
@@ -36,14 +34,16 @@ async fn dump<'a>(
         .collect::<Vec<_>>();
 
     for &(row, col, gc) in &cells {
-        await!(client.poly_fill_rectangle(
-            window,
-            gc,
-            (col * SNAKE_SIZE) as i16,
-            (row * SNAKE_SIZE) as i16,
-            SNAKE_SIZE as u16,
-            SNAKE_SIZE as u16,
-        ))?;
+        client
+            .poly_fill_rectangle(
+                window,
+                gc,
+                (col * SNAKE_SIZE) as i16,
+                (row * SNAKE_SIZE) as i16,
+                SNAKE_SIZE as u16,
+                SNAKE_SIZE as u16,
+            )
+            .await?;
     }
     Ok(())
 }
@@ -54,31 +54,33 @@ fn main() {
     let interval = Interval::new_interval(std::time::Duration::from_millis(100));
 
     let f = async move || -> std::io::Result<()> {
-        let (server_init, mut client, events) = await!(x11::connect_unix(0))?;
+        let (server_init, mut client, events) = x11::connect_unix(0).await?;
 
         let window = server_init.resource_id_base + 1;
         let snake_gc = window + 1;
         let bg_gc = snake_gc + 1;
         let target_gc = bg_gc + 1;
 
-        await!(client.create_window(
-            24,
-            window,
-            server_init.roots[0].root,
-            0,
-            0,
-            (WIDTH * SNAKE_SIZE) as u16,
-            (HEIGHT * SNAKE_SIZE) as u16,
-            0, // border-width
-            1, // InputOutput
-            0, // visual: CopyFromParent
-        ))?;
+        client
+            .create_window(
+                24,
+                window,
+                server_init.roots[0].root,
+                0,
+                0,
+                (WIDTH * SNAKE_SIZE) as u16,
+                (HEIGHT * SNAKE_SIZE) as u16,
+                0, // border-width
+                1, // InputOutput
+                0, // visual: CopyFromParent
+            )
+            .await?;
 
-        await!(client.map_window(window))?;
-        await!(client.change_wm_name(window, "Snake"))?;
-        await!(client.create_gc(snake_gc, window, 0x00_AA_00))?;
-        await!(client.create_gc(bg_gc, window, 0xFF_FF_FF))?;
-        await!(client.create_gc(target_gc, window, 0xee_99_22))?;
+        client.map_window(window).await?;
+        client.change_wm_name(window, "Snake").await?;
+        client.create_gc(snake_gc, window, 0x00_AA_00).await?;
+        client.create_gc(bg_gc, window, 0xFF_FF_FF).await?;
+        client.create_gc(target_gc, window, 0xee_99_22).await?;
 
         enum Tick {
             X11Event(Event),
@@ -86,30 +88,27 @@ fn main() {
         }
 
         let x11 = events.into_stream().map(Tick::X11Event);
-        let timer = interval
-            .map(|_| Tick::TimerFired)
-            .map_err(|e| panic!("timer failed for no good reason: {:?}", e));
+        let timer = interval.compat().map(|x| {
+            x.expect("timer failed for no good reason");
+            Tick::TimerFired
+        });
 
-        let mut read_or_tick = x11.select(timer);
+        let mut read_or_tick = futures::stream::select(x11, timer);
 
         loop {
-            let event = await!(read_or_tick.into_future());
+            let (event, new_stream) = read_or_tick.into_future().await;
             match event {
-                Err(x) => return Err(x.0),
-                Ok((tick, new_stream)) => {
+                None => panic!("stream unexpectedly ended"),
+                Some(tick) => {
                     read_or_tick = new_stream;
                     match tick {
-                        Some(Tick::X11Event(event)) => {
+                        Tick::X11Event(event) => {
                             println!("x11");
                             match event {
-                                Event::Expose { .. } => await!(dump(
-                                    &mut client,
-                                    &game,
-                                    window,
-                                    snake_gc,
-                                    target_gc,
-                                    bg_gc
-                                ))?,
+                                Event::Expose { .. } => {
+                                    dump(&mut client, &game, window, snake_gc, target_gc, bg_gc)
+                                        .await?
+                                }
                                 Event::KeyPress { detail: key, .. } => {
                                     use crate::board::Direction::*;
                                     match key {
@@ -125,13 +124,10 @@ fn main() {
                                 }
                             }
                         }
-                        Some(Tick::TimerFired) => {
+                        Tick::TimerFired => {
                             println!("timer");
                             game.tick();
-                            await!(dump(&mut client, &game, window, snake_gc, target_gc, bg_gc))?;
-                        }
-                        None => {
-                            println!("why would a stream yield None?");
+                            dump(&mut client, &game, window, snake_gc, target_gc, bg_gc).await?;
                         }
                     }
                 }
@@ -139,11 +135,12 @@ fn main() {
         }
     };
 
-    tokio::run_async(
-        async move {
-            await!(f()).expect("future should succeed");
-        },
-    );
+    tokio::run(Compat::new(Box::pin(async move {
+        match f().await {
+            Err(e) => panic!("I/O error: {}", e),
+            Ok(x) => Ok(x),
+        }
+    })));
 }
 
 #[test]
