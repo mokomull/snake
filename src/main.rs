@@ -4,6 +4,7 @@ mod board;
 mod x11;
 
 use futures::compat::{Compat, Stream01CompatExt};
+use futures::future::Either::{Left, Right};
 use futures::stream::StreamExt;
 use tokio::timer::Interval;
 use x11_client::*;
@@ -51,10 +52,10 @@ async fn dump<'a>(
 fn main() {
     let mut game = board::Game::new(WIDTH, HEIGHT);
 
-    let interval = Interval::new_interval(std::time::Duration::from_millis(100));
+    let mut interval = Interval::new_interval(std::time::Duration::from_millis(100)).compat();
 
     let f = async move || -> std::io::Result<()> {
-        let (server_init, mut client, events) = x11::connect_unix(0).await?;
+        let (server_init, mut client, mut events) = x11::connect_unix(0).await?;
 
         let window = server_init.resource_id_base + 1;
         let snake_gc = window + 1;
@@ -82,54 +83,39 @@ fn main() {
         client.create_gc(bg_gc, window, 0xFF_FF_FF).await?;
         client.create_gc(target_gc, window, 0xee_99_22).await?;
 
-        enum Tick {
-            X11Event(Event),
-            TimerFired,
-        }
-
-        let x11 = events.into_stream().map(Tick::X11Event);
-        let timer = interval.compat().map(|x| {
-            x.expect("timer failed for no good reason");
-            Tick::TimerFired
-        });
-
-        let mut read_or_tick = futures::stream::select(x11, timer);
-
         loop {
-            let (event, new_stream) = read_or_tick.into_future().await;
-            match event {
-                None => panic!("stream unexpectedly ended"),
-                Some(tick) => {
-                    read_or_tick = new_stream;
-                    match tick {
-                        Tick::X11Event(event) => {
-                            println!("x11");
-                            match event {
-                                Event::Expose { .. } => {
-                                    dump(&mut client, &game, window, snake_gc, target_gc, bg_gc)
-                                        .await?
-                                }
-                                Event::KeyPress { detail: key, .. } => {
-                                    use crate::board::Direction::*;
-                                    match key {
-                                        111 => game.set_direction(Up),
-                                        113 => game.set_direction(Left),
-                                        114 => game.set_direction(Right),
-                                        116 => game.set_direction(Down),
-                                        _ => (),
-                                    };
-                                }
-                                _ => {
-                                    println!("Unhandled event: {:?}", event);
-                                }
-                            }
+            let tick =
+                futures::future::select(Box::pin(events.get_event()), Box::pin(interval.next()))
+                    .await;
+            match tick {
+                Left((event, _)) => {
+                    println!("x11");
+                    match event.expect("x11 connection failed") {
+                        Event::Expose { .. } => {
+                            dump(&mut client, &game, window, snake_gc, target_gc, bg_gc).await?
                         }
-                        Tick::TimerFired => {
-                            println!("timer");
-                            game.tick();
-                            dump(&mut client, &game, window, snake_gc, target_gc, bg_gc).await?;
+                        Event::KeyPress { detail: key, .. } => {
+                            use crate::board::Direction::*;
+                            match key {
+                                111 => game.set_direction(Up),
+                                113 => game.set_direction(Left),
+                                114 => game.set_direction(Right),
+                                116 => game.set_direction(Down),
+                                _ => (),
+                            };
+                        }
+                        e => {
+                            println!("Unhandled event: {:?}", e);
                         }
                     }
+                }
+                Right((timer_event, _)) => {
+                    timer_event
+                        .expect("timer Stream didn't yield anything")
+                        .expect("timer failed for no good reason");
+                    println!("timer");
+                    game.tick();
+                    dump(&mut client, &game, window, snake_gc, target_gc, bg_gc).await?;
                 }
             }
         }
