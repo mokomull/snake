@@ -134,10 +134,15 @@ impl X11Events {
     }
 
     pub fn into_stream(self) -> impl Stream<Item = Event> {
-        Box::pin(unfold(self.read, async move |mut read| {
-            let mut buf = [0 as u8; 32];
-            read.read_exact(&mut buf).await.ok()?;
-            Some((Event::from_bytes(&buf), read))
-        }))
+        Box::pin(unfold(self.read, read_event))
     }
+}
+
+async fn read_event<T>(mut read: T) -> Option<(Event, T)>
+where
+    T: futures::io::AsyncRead + std::marker::Unpin,
+{
+    let mut buf = [0 as u8; 32];
+    read.read_exact(&mut buf).await.ok()?;
+    Some((Event::from_bytes(&buf), read))
 }
