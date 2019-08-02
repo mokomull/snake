@@ -3,7 +3,6 @@
 mod board;
 mod x11;
 
-use futures::compat::{Compat, Stream01CompatExt};
 use futures::stream::StreamExt;
 use tokio::timer::Interval;
 use x11_client::*;
@@ -87,10 +86,7 @@ async fn main_loop() -> std::io::Result<()> {
     }
 
     let x11 = events.into_stream().map(Tick::X11Event);
-    let timer = interval.compat().map(|x| {
-        x.expect("timer failed for no good reason");
-        Tick::TimerFired
-    });
+    let timer = interval.map(|_| Tick::TimerFired);
 
     let mut read_or_tick = futures::stream::select(x11, timer);
 
@@ -127,13 +123,14 @@ async fn main_loop() -> std::io::Result<()> {
     }
 }
 
-fn main() {
-    tokio::run(Compat::new(Box::pin(async move {
-        match main_loop().await {
-            Err(e) => panic!("I/O error: {}", e),
-            Ok(()) => Ok(()),
-        }
-    })));
+fn main() -> std::io::Result<()> {
+    let f = async move {
+        main_loop().await.expect("I/O error")
+    };
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(f);
+    Ok(())
 }
 
 #[test]

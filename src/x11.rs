@@ -1,17 +1,16 @@
 use byteorder::{BigEndian, ByteOrder};
-use futures::compat::{AsyncRead01CompatExt, Future01CompatExt};
-use futures::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use futures::stream::unfold;
 use futures::Stream;
 use std::io::{self, Result};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::UnixStream;
 
 use x11_client::*;
 
 pub async fn connect_unix(display: usize) -> Result<(ServerInit, X11Client, X11Events)> {
     let path = format!("/tmp/.X11-unix/X{}", display);
-    let socket = UnixStream::connect(path).compat().await?;
-    let (read, write) = socket.compat().split();
+    let socket = UnixStream::connect(path).await?;
+    let (read, write) = socket.split();
     let mut client = X11Client { write };
     let mut events = X11Events { read };
 
@@ -21,7 +20,7 @@ pub async fn connect_unix(display: usize) -> Result<(ServerInit, X11Client, X11E
 }
 
 pub struct X11Client {
-    write: WriteHalf<futures::compat::Compat01As03<UnixStream>>,
+    write: WriteHalf<UnixStream>,
 }
 
 impl X11Client {
@@ -101,7 +100,7 @@ impl X11Client {
 }
 
 pub struct X11Events {
-    read: ReadHalf<futures::compat::Compat01As03<UnixStream>>,
+    read: ReadHalf<UnixStream>,
 }
 
 impl X11Events {
