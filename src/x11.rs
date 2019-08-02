@@ -1,22 +1,20 @@
 use byteorder::{BigEndian, ByteOrder};
+use futures::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use futures::stream::unfold;
 use futures::Stream;
 use std::io::{self, Result};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
 use x11_client::*;
 
-type SharedUnixStream = std::rc::Rc<futures::lock::Mutex<UnixStream>>;
+type CompatUnixStream = futures_tokio_compat::Compat<UnixStream>;
 
 pub async fn connect_unix(display: usize) -> Result<(ServerInit, X11Client, X11Events)> {
     let path = format!("/tmp/.X11-unix/X{}", display);
     let socket = UnixStream::connect(path).await?;
-    let shared = std::rc::Rc::new(futures::lock::Mutex::new(socket));
-    let mut client = X11Client {
-        write: shared.clone(),
-    };
-    let mut events = X11Events { read: shared };
+    let (read, write) = CompatUnixStream::new(socket).split();
+    let mut client = X11Client { write };
+    let mut events = X11Events { read };
 
     client.write_init().await?;
     let server_init = events.read_init().await?;
@@ -24,7 +22,7 @@ pub async fn connect_unix(display: usize) -> Result<(ServerInit, X11Client, X11E
 }
 
 pub struct X11Client {
-    write: SharedUnixStream,
+    write: WriteHalf<CompatUnixStream>,
 }
 
 impl X11Client {
@@ -33,8 +31,7 @@ impl X11Client {
     where
         T: AsRef<[u8]> + Send + 'static,
     {
-        let mut writer = self.write.lock().await;
-        writer.write_all(buf.as_ref()).await?;
+        self.write.write_all(buf.as_ref()).await?;
         Ok(())
     }
 
@@ -105,7 +102,7 @@ impl X11Client {
 }
 
 pub struct X11Events {
-    read: SharedUnixStream,
+    read: ReadHalf<CompatUnixStream>,
 }
 
 impl X11Events {
@@ -113,8 +110,7 @@ impl X11Events {
     where
         T: AsMut<[u8]>,
     {
-        let mut reader = self.read.lock().await;
-        reader.read_exact(buf.as_mut()).await?;
+        self.read.read_exact(buf.as_mut()).await?;
         Ok(buf)
     }
 
