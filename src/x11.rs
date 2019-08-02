@@ -13,7 +13,9 @@ pub async fn connect_unix(display: usize) -> Result<(ServerInit, X11Client, X11E
     let path = format!("/tmp/.X11-unix/X{}", display);
     let socket = UnixStream::connect(path).await?;
     let shared = std::rc::Rc::new(futures::lock::Mutex::new(socket));
-    let mut client = X11Client { write: shared.clone() };
+    let mut client = X11Client {
+        write: shared.clone(),
+    };
     let mut events = X11Events { read: shared };
 
     client.write_init().await?;

@@ -124,9 +124,7 @@ async fn main_loop() -> std::io::Result<()> {
 }
 
 fn main() -> std::io::Result<()> {
-    let f = async move {
-        main_loop().await.expect("I/O error")
-    };
+    let f = async move { main_loop().await.expect("I/O error") };
 
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(f);
