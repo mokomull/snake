@@ -2,17 +2,19 @@ use byteorder::{BigEndian, ByteOrder};
 use futures::stream::unfold;
 use futures::Stream;
 use std::io::{self, Result};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
 use x11_client::*;
 
+type SharedUnixStream = std::rc::Rc<futures::lock::Mutex<UnixStream>>;
+
 pub async fn connect_unix(display: usize) -> Result<(ServerInit, X11Client, X11Events)> {
     let path = format!("/tmp/.X11-unix/X{}", display);
     let socket = UnixStream::connect(path).await?;
-    let (read, write) = socket.split();
-    let mut client = X11Client { write };
-    let mut events = X11Events { read };
+    let shared = std::rc::Rc::new(futures::lock::Mutex::new(socket));
+    let mut client = X11Client { write: shared.clone() };
+    let mut events = X11Events { read: shared };
 
     client.write_init().await?;
     let server_init = events.read_init().await?;
@@ -20,7 +22,7 @@ pub async fn connect_unix(display: usize) -> Result<(ServerInit, X11Client, X11E
 }
 
 pub struct X11Client {
-    write: WriteHalf<UnixStream>,
+    write: SharedUnixStream,
 }
 
 impl X11Client {
@@ -29,7 +31,8 @@ impl X11Client {
     where
         T: AsRef<[u8]> + Send + 'static,
     {
-        self.write.write_all(buf.as_ref()).await?;
+        let mut writer = self.write.lock().await;
+        writer.write_all(buf.as_ref()).await?;
         Ok(())
     }
 
@@ -100,7 +103,7 @@ impl X11Client {
 }
 
 pub struct X11Events {
-    read: ReadHalf<UnixStream>,
+    read: SharedUnixStream,
 }
 
 impl X11Events {
@@ -108,7 +111,8 @@ impl X11Events {
     where
         T: AsMut<[u8]>,
     {
-        self.read.read_exact(buf.as_mut()).await?;
+        let mut reader = self.read.lock().await;
+        reader.read_exact(buf.as_mut()).await?;
         Ok(buf)
     }
 
@@ -133,15 +137,12 @@ impl X11Events {
     }
 
     pub fn into_stream(self) -> impl Stream<Item = Event> {
-        Box::pin(unfold(self.read, read_event))
+        Box::pin(unfold(self, Self::read_event))
     }
-}
 
-async fn read_event<T>(mut read: T) -> Option<(Event, T)>
-where
-    T: futures::io::AsyncRead + std::marker::Unpin,
-{
-    let mut buf = [0 as u8; 32];
-    read.read_exact(&mut buf).await.ok()?;
-    Some((Event::from_bytes(&buf), read))
+    async fn read_event(mut self) -> Option<(Event, Self)> {
+        let mut buf = [0 as u8; 32];
+        self.read_exact(&mut buf).await.ok()?;
+        Some((Event::from_bytes(&buf), self))
+    }
 }
