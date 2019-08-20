@@ -10,4 +10,3 @@ x11_client = { git = "https://github.com/mokomull/x11_client.git" }
 byteorder = "1.0"
 futures-preview = { version = "0.3.0-alpha.14" }
 tokio = { git = "https://github.com/tokio-rs/tokio.git", branch = "master" }
-futures-tokio-compat = { git = "https://github.com/Nemo157/futures-tokio-compat.git" }
