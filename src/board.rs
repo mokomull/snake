@@ -94,54 +94,51 @@ impl Game {
 
     pub fn tick(&mut self) {
         let (column, row) = self.head;
-        match self.next(self.get_direction(), column, row) {
-            Some((new_column, new_row)) => {
-                match self.board.at(new_column, new_row) {
-                    Some(Empty) => {
-                        // Move forward normally - shrink the tail
-                        let (column, row) = self.tail;
-                        let d = match self.board.at(column, row).unwrap() {
-                            Snake(d) => d,
-                            _ => panic!("not a snake at the tail"),
-                        };
-                        // if the tail moves into a wall, the player already died
-                        let (new_tcol, new_trow) = self.next(d, column, row).unwrap();
+        let (new_column, new_row) = self
+            .next(self.get_direction(), column, row)
+            .expect("You died.");
+        match self.board.at(new_column, new_row) {
+            Some(Empty) => {
+                // Move forward normally - shrink the tail
+                let (column, row) = self.tail;
+                let d = match self.board.at(column, row).unwrap() {
+                    Snake(d) => d,
+                    _ => panic!("not a snake at the tail"),
+                };
+                // if the tail moves into a wall, the player already died
+                let (new_tcol, new_trow) = self.next(d, column, row).unwrap();
 
-                        // TODO: encapsulation violation, again
-                        self.board.board[new_row][new_column] = Snake(self.get_direction());
-                        self.board.board[row][column] = Empty;
-                        self.head = (new_column, new_row);
-                        self.tail = (new_tcol, new_trow);
-                    }
-                    Some(Target) => {
-                        // You ate the target - leave the tail and grow
-                        // TODO: board encapsulation.  Yet again.
-                        self.board.board[new_row][new_column] = Snake(self.get_direction());
-                        self.head = (new_column, new_row);
+                // TODO: encapsulation violation, again
+                self.board.board[new_row][new_column] = Snake(self.get_direction());
+                self.board.board[row][column] = Empty;
+                self.head = (new_column, new_row);
+                self.tail = (new_tcol, new_trow);
+            }
+            Some(Target) => {
+                // You ate the target - leave the tail and grow
+                // TODO: board encapsulation.  Yet again.
+                self.board.board[new_row][new_column] = Snake(self.get_direction());
+                self.head = (new_column, new_row);
 
-                        // Randomly generate a new target
-                        let mut rng = rand::thread_rng();
-                        let mut col_range = rand::distributions::Range::new(0, self.width);
-                        let mut row_range = rand::distributions::Range::new(0, self.height);
-                        use rand::distributions::Sample;
-                        loop {
-                            let (new_col, new_row) =
-                                (col_range.sample(&mut rng), row_range.sample(&mut rng));
+                // Randomly generate a new target
+                let mut rng = rand::thread_rng();
+                let mut col_range = rand::distributions::Range::new(0, self.width);
+                let mut row_range = rand::distributions::Range::new(0, self.height);
+                use rand::distributions::Sample;
+                loop {
+                    let (new_col, new_row) =
+                        (col_range.sample(&mut rng), row_range.sample(&mut rng));
 
-                            match self.board.at(new_col, new_row) {
-                                Some(Empty) | Some(Target) => {
-                                    self.board.board[new_row][new_col] = Target;
-                                    break;
-                                }
-                                _ => (), // keep going
-                            }
+                    match self.board.at(new_col, new_row) {
+                        Some(Empty) | Some(Target) => {
+                            self.board.board[new_row][new_col] = Target;
+                            break;
                         }
+                        _ => (), // keep going
                     }
-                    Some(Snake(_)) => panic!("You died."),
-                    None => panic!("You died."),
                 }
             }
-            None => panic!("You died."),
+            Some(Snake(_)) | None => panic!("You died."),
         }
     }
 
